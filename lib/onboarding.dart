@@ -8,6 +8,9 @@ import 'package:url_launcher/url_launcher.dart';
 import 'models.dart';
 import 'widgets.dart';
 import 'tabs.dart';
+import 'services/goal_engine.dart';
+import 'services/health_service.dart';
+
 
 // ==========================================
 // ONBOARDING - NAME
@@ -99,7 +102,7 @@ class _MedicalProfileScreenState extends State<MedicalProfileScreen> {
     final conditions = _selectedConditions.where((c) => c != 'None').join(', ');
     await prefs.setString('conditions', conditions.isEmpty ? 'None' : conditions);
     await prefs.setString('goals', _selectedGoals.join(', '));
-    if (mounted) Navigator.of(context).push(CupertinoPageRoute(builder: (_) => const ApiKeyScreen()));
+    if (mounted) Navigator.of(context).push(CupertinoPageRoute(builder: (_) => const BiometricOnboardingScreen()));
   }
 
   Widget _chip(String label, bool selected, VoidCallback onTap) {
@@ -192,8 +195,196 @@ class _MedicalProfileScreenState extends State<MedicalProfileScreen> {
 }
 
 // ==========================================
+// ONBOARDING - BIOMETRICS
+// ==========================================
+class BiometricOnboardingScreen extends StatefulWidget {
+  const BiometricOnboardingScreen({super.key});
+  @override
+  State<BiometricOnboardingScreen> createState() => _BiometricOnboardingScreenState();
+}
+
+class _BiometricOnboardingScreenState extends State<BiometricOnboardingScreen> {
+  String _unitSystem = 'metric';
+  final _heightCtrl = TextEditingController(text: '170');
+  final _weightCtrl = TextEditingController(text: '70');
+  final _goalWeightCtrl = TextEditingController(text: '65');
+  final _ageCtrl = TextEditingController(text: '30');
+  String _gender = 'male';
+  String _activity = 'sedentary';
+
+  void _next() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Convert to metric if imperial was selected
+    double h = double.tryParse(_heightCtrl.text) ?? 170.0;
+    double w = double.tryParse(_weightCtrl.text) ?? 70.0;
+    double gw = double.tryParse(_goalWeightCtrl.text) ?? 70.0;
+
+    if (_unitSystem == 'imperial') {
+      h = h * 2.54; // Assume inches for simplicity in this MVP, normally ft+in
+      w = w / 2.20462;
+      gw = gw / 2.20462;
+    }
+
+    await prefs.setString('unit_system', _unitSystem);
+    await prefs.setDouble('height_cm', h);
+    await prefs.setDouble('weight_kg', w);
+    await prefs.setDouble('initial_weight_kg', w);
+    await prefs.setDouble('goal_weight_kg', gw);
+    await prefs.setInt('age', int.tryParse(_ageCtrl.text) ?? 30);
+    await prefs.setString('gender', _gender);
+    await prefs.setString('activity_level', _activity);
+
+    if (mounted) Navigator.of(context).push(CupertinoPageRoute(builder: (_) => const HealthAppConnectScreen()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: CupertinoPageScaffold(
+        backgroundColor: kBg,
+        navigationBar: const CupertinoNavigationBar(backgroundColor: Color(0x00000000), border: null),
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              const Text("YOUR\nBODY", style: TextStyle(fontSize: 52, fontWeight: FontWeight.w900, height: 0.9, letterSpacing: -2, color: CupertinoColors.white)),
+              const SizedBox(height: 24),
+              
+              CupertinoSlidingSegmentedControl<String>(
+                groupValue: _unitSystem,
+                children: const {
+                  'metric': Padding(padding: EdgeInsets.symmetric(horizontal: 20), child: Text('Metric (kg/cm)')),
+                  'imperial': Padding(padding: EdgeInsets.symmetric(horizontal: 20), child: Text('Imperial (lbs/in)')),
+                },
+                onValueChanged: (v) => setState(() => _unitSystem = v!),
+              ),
+              const SizedBox(height: 24),
+              
+              BentoCard(
+                child: Column(children: [
+                  CupertinoTextField(controller: _ageCtrl, placeholder: 'Age', keyboardType: TextInputType.number),
+                  const SizedBox(height: 12),
+                  CupertinoTextField(controller: _heightCtrl, placeholder: _unitSystem == 'metric' ? 'Height (cm)' : 'Height (inches)', keyboardType: TextInputType.number),
+                  const SizedBox(height: 12),
+                  CupertinoTextField(controller: _weightCtrl, placeholder: _unitSystem == 'metric' ? 'Current Weight (kg)' : 'Current Weight (lbs)', keyboardType: TextInputType.number),
+                  const SizedBox(height: 12),
+                  CupertinoTextField(controller: _goalWeightCtrl, placeholder: _unitSystem == 'metric' ? 'Goal Weight (kg)' : 'Goal Weight (lbs)', keyboardType: TextInputType.number),
+                ]),
+              ),
+              const SizedBox(height: 16),
+              
+              BentoCard(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('GENDER', style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  CupertinoSlidingSegmentedControl<String>(
+                    groupValue: _gender,
+                    children: const {'male': Text('Male'), 'female': Text('Female'), 'other': Text('Other')},
+                    onValueChanged: (v) => setState(() => _gender = v!),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 16),
+
+              BentoCard(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('ACTIVITY LEVEL', style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  ...['sedentary', 'light', 'moderate', 'active', 'very_active'].map((level) {
+                    final selected = _activity == level;
+                    return GestureDetector(
+                      onTap: () => setState(() => _activity = level),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: selected ? kNeon.withOpacity(0.2) : kBg,
+                          border: Border.all(color: selected ? kNeon : kBorder),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(children: [
+                          Icon(selected ? CupertinoIcons.check_mark_circled_solid : CupertinoIcons.circle, color: selected ? kNeon : CupertinoColors.systemGrey, size: 20),
+                          const SizedBox(width: 12),
+                          Text(level.toUpperCase().replaceAll('_', ' '), style: TextStyle(color: selected ? kNeon : CupertinoColors.white, fontWeight: FontWeight.bold)),
+                        ]),
+                      ),
+                    );
+                  }).toList(),
+                ]),
+              ),
+
+              const SizedBox(height: 40),
+              NeonButton(text: "Next →", onPressed: _next),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// ONBOARDING - HEALTH APP
+// ==========================================
+class HealthAppConnectScreen extends StatelessWidget {
+  const HealthAppConnectScreen({super.key});
+
+  void _next(BuildContext context) {
+    Navigator.of(context).push(CupertinoPageRoute(builder: (_) => const ApiKeyScreen()));
+  }
+
+  void _connect(BuildContext context) async {
+    final health = HealthService();
+    try {
+      final success = await health.requestPermissions();
+      final prefs = await SharedPreferences.getInstance();
+      if (Platform.isIOS) {
+        await prefs.setBool('health_connected_ios', success);
+      } else {
+        await prefs.setBool('health_connected_android', success);
+      }
+    } catch (e) {
+      debugPrint("Health Connect Error: \$e");
+    }
+    _next(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isIOS = Platform.isIOS;
+    return CupertinoPageScaffold(
+      backgroundColor: kBg,
+      navigationBar: const CupertinoNavigationBar(backgroundColor: Color(0x00000000), border: null),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(CupertinoIcons.heart_circle_fill, size: 100, color: kPink),
+              const SizedBox(height: 24),
+              Text(isIOS ? "CONNECT\nAPPLE HEALTH" : "CONNECT\nHEALTH CONNECT", style: const TextStyle(fontSize: 40, fontWeight: FontWeight.w900, height: 0.9, letterSpacing: -1, color: CupertinoColors.white), textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              const Text("We read your steps, sleep, and active calories to compute your goals and daily score.", style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 16), textAlign: TextAlign.center),
+              const SizedBox(height: 60),
+              NeonButton(text: "Connect", onPressed: () => _connect(context), color: kPink),
+              const SizedBox(height: 16),
+              CupertinoButton(child: const Text('Skip for now', style: TextStyle(color: CupertinoColors.systemGrey)), onPressed: () => _next(context)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
 // ONBOARDING - API KEY
 // ==========================================
+
 class ApiKeyScreen extends StatefulWidget {
   const ApiKeyScreen({super.key});
   @override
@@ -215,8 +406,41 @@ class _ApiKeyScreenState extends State<ApiKeyScreen> {
     setState(() { _isValidating = true; _errorMsg = ''; });
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('api_key', _apiController.text.trim());
+      final apiKey = _apiController.text.trim();
+      
+      // Validate API key
+      try {
+        final testModel = GenerativeModel(model: 'gemini-2.5-flash', apiKey: apiKey);
+        await testModel.generateContent([Content.text("hi")]);
+      } catch (e) {
+        if (mounted) {
+          setState(() { _errorMsg = 'Invalid or unauthorized API Key. Please check and try again.'; });
+        }
+        return;
+      }
+
+      await prefs.setString('api_key', apiKey);
       if (!prefs.containsKey('history')) await prefs.setStringList('history', []);
+      
+      // Attempt to calculate goals using GoalEngine
+      try {
+        final bio = BiometricProfile(
+          heightCm: prefs.getDouble('height_cm') ?? 170.0,
+          weightKg: prefs.getDouble('weight_kg') ?? 70.0,
+          goalWeightKg: prefs.getDouble('goal_weight_kg') ?? 70.0,
+          initialWeightKg: prefs.getDouble('initial_weight_kg') ?? 70.0,
+          age: prefs.getInt('age') ?? 30,
+          gender: prefs.getString('gender') ?? 'other',
+          activityLevel: prefs.getString('activity_level') ?? 'sedentary',
+          unitSystem: prefs.getString('unit_system') ?? 'metric',
+        );
+        final conds = prefs.getString('conditions') ?? '';
+        final goals = prefs.getString('goals') ?? '';
+        await GoalEngine.computeGoals(bio, conds, goals);
+      } catch (e) {
+        debugPrint("Initial goal compute failed: \$e");
+      }
+
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
           CupertinoPageRoute(builder: (_) => const MainTabScreen()),
@@ -298,7 +522,21 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _nameCtrl = TextEditingController();
   final _apiCtrl = TextEditingController();
+  
+  // Biometrics
+  final _heightCtrl = TextEditingController();
+  final _weightCtrl = TextEditingController();
+  final _goalWeightCtrl = TextEditingController();
+  final _ageCtrl = TextEditingController();
+  String _gender = 'male';
+  String _activity = 'sedentary';
+  String _unitSystem = 'metric';
+
   bool _showApiKey = false;
+  bool _isRecalculating = false;
+  bool _autoRecalculate = false;
+  bool _healthConnected = false;
+  bool _requestingHealthPermission = false;
 
   final _conditions = [
     'None', 'Type 2 Diabetes', 'Type 1 Diabetes', 'Hypertension',
@@ -316,6 +554,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadData();
+    _checkHealthConnection();
+  }
+
+  Future<void> _checkHealthConnection() async {
+    final prefs = await SharedPreferences.getInstance();
+    final connected = prefs.getBool('health_connected') ?? false;
+    if (mounted) {
+      setState(() => _healthConnected = connected);
+    }
+  }
+
+  Future<void> _connectAppleHealth() async {
+    setState(() => _requestingHealthPermission = true);
+    try {
+      final authorized = await HealthService().requestPermissions();
+      if (authorized) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('health_connected', true);
+        if (mounted) {
+          setState(() => _healthConnected = true);
+          showCupertinoDialog(
+            context: context,
+            builder: (_) => CupertinoAlertDialog(
+              title: const Text('Connected! ✅'),
+              content: const Text('Apple Health is now connected. Your fitness data will sync automatically.'),
+              actions: [CupertinoDialogAction(child: const Text('Great'), onPressed: () => Navigator.pop(context))],
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          showCupertinoDialog(
+            context: context,
+            builder: (_) => CupertinoAlertDialog(
+              title: const Text('Permission Denied'),
+              content: const Text('Apple Health permissions are required to sync your fitness data. Please enable them in Settings.'),
+              actions: [CupertinoDialogAction(child: const Text('OK'), onPressed: () => Navigator.pop(context))],
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text('Error'),
+            content: Text('Could not connect to Apple Health: $e'),
+            actions: [CupertinoDialogAction(child: const Text('OK'), onPressed: () => Navigator.pop(context))],
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _requestingHealthPermission = false);
+    }
   }
 
   Future<void> _loadData() async {
@@ -327,13 +620,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     _nameCtrl.text = name;
     _apiCtrl.text = apiKey;
-
+    _heightCtrl.text = (prefs.getDouble('height_cm') ?? 170.0).toStringAsFixed(0);
+    _weightCtrl.text = (prefs.getDouble('weight_kg') ?? 70.0).toStringAsFixed(1);
+    _goalWeightCtrl.text = (prefs.getDouble('goal_weight_kg') ?? 70.0).toStringAsFixed(1);
+    _ageCtrl.text = (prefs.getInt('age') ?? 30).toString();
+    
     final loadedConds = condStr.split(', ').map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
     final loadedGoals = goalStr.split(', ').map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
 
     setState(() {
       _selectedConditions = loadedConds.isEmpty ? {'None'} : loadedConds;
       _selectedGoals = loadedGoals;
+      _gender = prefs.getString('gender') ?? 'male';
+      _activity = prefs.getString('activity_level') ?? 'sedentary';
+      _unitSystem = prefs.getString('unit_system') ?? 'metric';
+      _autoRecalculate = prefs.getBool('auto_recalculate') ?? false;
     });
   }
 
@@ -345,6 +646,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final conds = _selectedConditions.where((c) => c != 'None').join(', ');
     await prefs.setString('conditions', conds.isEmpty ? 'None' : conds);
     await prefs.setString('goals', _selectedGoals.join(', '));
+    
+    await prefs.setDouble('height_cm', double.tryParse(_heightCtrl.text) ?? 170.0);
+    await prefs.setDouble('weight_kg', double.tryParse(_weightCtrl.text) ?? 70.0);
+    await prefs.setDouble('goal_weight_kg', double.tryParse(_goalWeightCtrl.text) ?? 70.0);
+    await prefs.setInt('age', int.tryParse(_ageCtrl.text) ?? 30);
+    await prefs.setString('gender', _gender);
+    await prefs.setString('activity_level', _activity);
+    await prefs.setString('unit_system', _unitSystem);
+    await prefs.setBool('auto_recalculate', _autoRecalculate);
 
     if (mounted) {
       showCupertinoDialog(
@@ -355,6 +665,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
           actions: [CupertinoDialogAction(child: const Text('OK'), onPressed: () => Navigator.pop(context))],
         ),
       );
+    }
+  }
+
+  Future<void> _recalculateGoals() async {
+    setState(() => _isRecalculating = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final bio = BiometricProfile(
+        heightCm: prefs.getDouble('height_cm') ?? 170.0,
+        weightKg: prefs.getDouble('weight_kg') ?? 70.0,
+        goalWeightKg: prefs.getDouble('goal_weight_kg') ?? 70.0,
+        initialWeightKg: prefs.getDouble('initial_weight_kg') ?? 70.0,
+        age: prefs.getInt('age') ?? 30,
+        gender: prefs.getString('gender') ?? 'other',
+        activityLevel: prefs.getString('activity_level') ?? 'sedentary',
+        unitSystem: prefs.getString('unit_system') ?? 'metric',
+      );
+      final conds = prefs.getString('conditions') ?? '';
+      final goals = prefs.getString('goals') ?? '';
+      await GoalEngine.computeGoals(bio, conds, goals);
+      
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text('Goals Recalculated 🎯'),
+            content: const Text('Your nutritional targets have been updated based on your profile.'),
+            actions: [CupertinoDialogAction(child: const Text('Awesome'), onPressed: () => Navigator.pop(context))],
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text('Error'),
+            content: Text(e.toString()),
+            actions: [CupertinoDialogAction(child: const Text('OK'), onPressed: () => Navigator.pop(context))],
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isRecalculating = false);
     }
   }
 
@@ -475,9 +829,151 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ]),
               ),
+              const SizedBox(height: 14),
+
+              // BIOMETRICS
+              BentoCard(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    const Text('BIOMETRICS', style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1)),
+                    CupertinoSlidingSegmentedControl<String>(
+                      groupValue: _unitSystem,
+                      children: const {'metric': Text('  Metric  ', style: TextStyle(fontSize: 12)), 'imperial': Text(' Imperial ', style: TextStyle(fontSize: 12))},
+                      onValueChanged: (v) => setState(() => _unitSystem = v!),
+                    ),
+                  ]),
+                  const SizedBox(height: 16),
+                  
+                  Row(children: [
+                    Expanded(child: _buildBioField('AGE', _ageCtrl)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _buildBioField('HEIGHT', _heightCtrl)),
+                  ]),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    Expanded(child: _buildBioField('WEIGHT', _weightCtrl)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _buildBioField('GOAL WT', _goalWeightCtrl)),
+                  ]),
+                  
+                  const SizedBox(height: 16),
+                  const Text('GENDER', style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1)),
+                  const SizedBox(height: 8),
+                  CupertinoSlidingSegmentedControl<String>(
+                    groupValue: _gender,
+                    children: const {'male': Text('Male'), 'female': Text('Female'), 'other': Text('Other')},
+                    onValueChanged: (v) => setState(() => _gender = v!),
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  const Text('ACTIVITY LEVEL', style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1)),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 120,
+                    child: CupertinoPicker(
+                      itemExtent: 32,
+                      scrollController: FixedExtentScrollController(initialItem: ['sedentary','light','moderate','active','very_active'].indexOf(_activity)),
+                      onSelectedItemChanged: (i) => setState(() => _activity = ['sedentary','light','moderate','active','very_active'][i]),
+                      children: ['sedentary','light','moderate','active','very_active'].map((e) => Center(child: Text(e.toUpperCase().replaceAll('_', ' '), style: const TextStyle(color: CupertinoColors.white, fontSize: 14)))).toList(),
+                    ),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 14),
+
+              // APPLE HEALTH CONNECTION
+              BentoCard(
+                glowColor: _healthConnected ? const Color(0x2200FF00) : const Color(0x22FF9500),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('APPLE HEALTH & FITNESS', style: TextStyle(color: CupertinoColors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              Text(
+                                _healthConnected 
+                                  ? '✅ Connected - Your health data is syncing'
+                                  : '⚠️ Not connected - Tap to enable',
+                                style: TextStyle(
+                                  color: _healthConnected ? const Color(0xFF30D158) : CupertinoColors.systemGrey,
+                                  fontSize: 11
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                    ),
+                    if (!_healthConnected) ...[
+                      const SizedBox(height: 12),
+                      CupertinoButton(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        color: const Color(0xFF1A1A1A),
+                        borderRadius: BorderRadius.circular(12),
+                        onPressed: _requestingHealthPermission ? null : _connectAppleHealth,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (_requestingHealthPermission)
+                              const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CupertinoActivityIndicator(),
+                              )
+                            else
+                              const Icon(CupertinoIcons.heart_fill, size: 16, color: CupertinoColors.destructiveRed),
+                            const SizedBox(width: 8),
+                            Text(
+                              _requestingHealthPermission ? 'Connecting...' : 'Connect Apple Health',
+                              style: const TextStyle(
+                                color: CupertinoColors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // AUTOMATION
+              BentoCard(
+                glowColor: const Color(0x22FFFFFF),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text('AUTO RECALCULATE GOALS', style: TextStyle(color: CupertinoColors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                        SizedBox(height: 4),
+                        Text('Daily AI check based on last 7-10 days', style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 11)),
+                      ],
+                    ),
+                    CupertinoSwitch(
+                      value: _autoRecalculate,
+                      activeColor: kNeon,
+                      onChanged: (val) => setState(() => _autoRecalculate = val),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 28),
 
               NeonButton(text: 'Save Changes ✓', onPressed: _save),
+              const SizedBox(height: 14),
+              NeonButton(text: 'Recalculate AI Goals 🎯', onPressed: _recalculateGoals, color: kTeal, isLoading: _isRecalculating),
               const SizedBox(height: 14),
               CupertinoButton(
                 onPressed: _resetAll,
@@ -489,5 +985,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildBioField(String label, TextEditingController ctrl) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: const TextStyle(color: CupertinoColors.systemGrey, fontSize: 11, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 4),
+      CupertinoTextField(
+        controller: ctrl,
+        keyboardType: TextInputType.number,
+        style: const TextStyle(color: CupertinoColors.white, fontSize: 14, fontWeight: FontWeight.bold),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(color: const Color(0xFF1A1A1A), borderRadius: BorderRadius.circular(8)),
+      ),
+    ]);
   }
 }

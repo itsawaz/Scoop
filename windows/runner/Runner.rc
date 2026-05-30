@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.neerajsingh" "\0"
-            VALUE "FileDescription", "calorie_deficit" "\0"
+            VALUE "FileDescription", "Scoop" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "calorie_deficit" "\0"
+            VALUE "InternalName", "scoop" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.neerajsingh. All rights reserved." "\0"
-            VALUE "OriginalFilename", "calorie_deficit.exe" "\0"
-            VALUE "ProductName", "calorie_deficit" "\0"
+            VALUE "OriginalFilename", "scoop.exe" "\0"
+            VALUE "ProductName", "Scoop" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

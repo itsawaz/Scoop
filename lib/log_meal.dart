@@ -6,6 +6,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
 import 'widgets.dart';
+import 'services/storage_service.dart';
+import 'services/streak_service.dart';
+import 'state.dart';
 
 class ChatMessage {
   final String role; // 'user' or 'ai'
@@ -27,6 +30,7 @@ class _LogMealScreenState extends State<LogMealScreen> {
   XFile? _image;
   bool _isAnalyzing = false;
   bool _chatStarted = false;
+  bool _showExtendedNutrients = false;
   final List<ChatMessage> _chatHistory = [];
   NutritionData? _latestNutrition;
   GenerativeModel? _model;
@@ -68,15 +72,26 @@ Analyze the food described/shown and return ONLY a valid JSON object with these 
   "sugar": 8.0,
   "fiber": 4.0,
   "sodium": 800.0,
+  "saturatedFat": 5.0,
+  "transFat": 0.5,
+  "cholesterol": 80.0,
+  "potassium": 450.0,
+  "magnesium": 45.0,
+  "zinc": 2.5,
+  "vitaminA": 150.0,
+  "vitaminB6": 0.8,
+  "vitaminB12": 1.2,
   "vitaminC": 20.0,
   "vitaminD": 2.0,
+  "folate": 120.0,
   "calcium": 150.0,
+  "phosphorus": 200.0,
   "iron": 3.5,
   "reasoning": "Detailed explanation of why you estimated these values, portion size assumptions, etc.",
   "medicalAlert": "ALERT: This food is high in sugar which is dangerous for your Diabetes. Or empty string if no alert."
 }
 
-All numeric values are per-serving amounts in grams (g) or standard units.
+All numeric values are per-serving amounts in grams (g) or standard units (mg, mcg).
 Return ONLY the JSON. No markdown. No backticks. No extra text.
 """;
 
@@ -129,9 +144,20 @@ Return ONLY a valid JSON object with EXACTLY these keys (no others):
   "sugar": 79.0,
   "fiber": 11.0,
   "sodium": 3.0,
+  "saturatedFat": 0.3,
+  "transFat": 0.0,
+  "cholesterol": 0.0,
+  "potassium": 422.0,
+  "magnesium": 34.0,
+  "zinc": 0.3,
+  "vitaminA": 3.0,
+  "vitaminB6": 0.6,
+  "vitaminB12": 0.0,
   "vitaminC": 134.0,
   "vitaminD": 0.0,
+  "folate": 80.0,
   "calcium": 80.0,
+  "phosphorus": 101.0,
   "iron": 2.0,
   "reasoning": "Your detailed reasoning here.",
   "medicalAlert": ""
@@ -189,15 +215,92 @@ Do NOT wrap in backticks. Do NOT add extra keys. Return raw JSON only.
     });
   }
 
-  void _confirmEntry() async {
+  void _confirmEntry() {
     if (_latestNutrition == null) return;
+    
+    final n = _latestNutrition!;
+    final nameCtrl = TextEditingController(text: n.foodName);
+    final descCtrl = TextEditingController(text: n.reasoning.split('.').first + '.');
+
+    showCupertinoDialog(
+      context: context,
+      builder: (dialogCtx) => CupertinoAlertDialog(
+        title: const Text('Save to Library?'),
+        content: Column(children: [
+          const SizedBox(height: 12),
+          const Text('Save this meal for quick 1-tap logging later.', style: TextStyle(fontSize: 12)),
+          const SizedBox(height: 12),
+          CupertinoTextField(
+            controller: nameCtrl,
+            placeholder: 'Meal name',
+            style: const TextStyle(color: CupertinoColors.white),
+            decoration: BoxDecoration(color: const Color(0xFF1A1A1A), borderRadius: BorderRadius.circular(8)),
+          ),
+          const SizedBox(height: 8),
+          CupertinoTextField(
+            controller: descCtrl,
+            placeholder: 'Description',
+            maxLines: 2,
+            style: const TextStyle(color: CupertinoColors.white, fontSize: 13),
+            decoration: BoxDecoration(color: const Color(0xFF1A1A1A), borderRadius: BorderRadius.circular(8)),
+          ),
+        ]),
+        actions: [
+          CupertinoDialogAction(child: const Text('Skip', style: TextStyle(color: CupertinoColors.systemGrey)), onPressed: () {
+            Navigator.pop(dialogCtx);
+            _doLog(n, null);
+          }),
+          CupertinoDialogAction(isDefaultAction: true, child: const Text('Save & Log'), onPressed: () async {
+            final mealId = DateTime.now().millisecondsSinceEpoch.toString();
+            await _saveMealToLibrary(n, nameCtrl.text, descCtrl.text, mealId);
+            if (mounted) Navigator.pop(dialogCtx);
+            _doLog(n, mealId);
+          }),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _saveMealToLibrary(NutritionData n, String name, String desc, String mealId) async {
+    // We update the nutrition's foodName in case they edited it
+    final updatedN = NutritionData(
+      calories: n.calories, protein: n.protein, carbs: n.carbs, fat: n.fat, sugar: n.sugar,
+      fiber: n.fiber, sodium: n.sodium, vitaminC: n.vitaminC, vitaminD: n.vitaminD,
+      calcium: n.calcium, iron: n.iron, reasoning: n.reasoning, medicalAlert: n.medicalAlert,
+      foodName: name,
+    );
+    final saved = SavedMeal(
+      id: mealId,
+      savedAt: DateTime.now(),
+      nutrition: updatedN,
+      aiDescription: desc,
+      chatContext: () {
+        final ctx = _chatHistory.map((m) => "${m.role}: ${m.text}").join('\n');
+        return ctx.length > 500 ? ctx.substring(0, 500) : ctx;
+      }(),
+      useCount: 1, // Start with 1 since we are logging it right now
+    );
+    await StorageService().saveMealToLibrary(saved);
+  }
+
+  void _doLog(NutritionData n, String? savedMealId) async {
     final prefs = await SharedPreferences.getInstance();
+
+    // Use the globally selected date for the timestamp,
+    // but keep the current time-of-day for ordering.
+    final now = DateTime.now();
+    final selDate = globalSelectedDate.value;
+    final logTimestamp = DateTime(
+      selDate.year, selDate.month, selDate.day,
+      now.hour, now.minute, now.second,
+    );
 
     final entry = MealEntry(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
-      timestamp: DateTime.now(),
-      nutrition: _latestNutrition!,
-      note: _latestNutrition!.foodName,
+      timestamp: logTimestamp,
+      nutrition: n,
+      note: n.foodName,
+      savedMealId: savedMealId,
     );
 
     final historyList = prefs.getStringList('history') ?? [];
@@ -205,12 +308,16 @@ Do NOT wrap in backticks. Do NOT add extra keys. Return raw JSON only.
     await prefs.setStringList('history', historyList);
 
     // API limit counter
-    final now = DateTime.now();
     final todayStr = "${now.year}-${now.month}-${now.day}";
     final apiDate = prefs.getString('api_date') ?? todayStr;
     int apiCount = (apiDate == todayStr) ? (prefs.getInt('api_count') ?? 0) : 0;
     await prefs.setString('api_date', todayStr);
     await prefs.setInt('api_count', apiCount + 1);
+
+    // Only award streak/XP when logging for today
+    if (isSelectedDateToday) {
+      await StreakService().logActivity();
+    }
 
     if (mounted) Navigator.pop(context, entry);
   }
@@ -386,6 +493,8 @@ Do NOT wrap in backticks. Do NOT add extra keys. Return raw JSON only.
                   const SizedBox(width: 8),
                   Expanded(child: _macroChip('VIT-C', '${n.vitaminC.round()}mg', '', kTeal)),
                 ]),
+                const SizedBox(height: 12),
+                _buildExtendedNutrientSection(n),
               ],
             ),
           ),
@@ -409,6 +518,104 @@ Do NOT wrap in backticks. Do NOT add extra keys. Return raw JSON only.
           Text(value, style: const TextStyle(color: CupertinoColors.white, fontSize: 13, fontWeight: FontWeight.w900)),
         ],
       ),
+    );
+  }
+
+  Widget _buildExtendedNutrientSection(NutritionData n) {
+    return GestureDetector(
+      onTap: () => setState(() => _showExtendedNutrients = !_showExtendedNutrients),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2A2A2A),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: kTeal.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  _showExtendedNutrients ? '▼ All Nutrients' : '▶ Show More Nutrients',
+                  style: TextStyle(color: kTeal, fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+                const Spacer(),
+                Text(
+                  '${(n.saturatedFat + n.transFat + n.cholesterol / 100 + n.potassium / 100 + n.magnesium + n.zinc).toStringAsFixed(0)} more',
+                  style: const TextStyle(color: CupertinoColors.systemGrey, fontSize: 11),
+                ),
+              ],
+            ),
+            if (_showExtendedNutrients) ...[
+              const SizedBox(height: 12),
+              _nutrientGrid([
+                ('Sat Fat', '${n.saturatedFat.round()}g', Color(0xFFFF6B6B)),
+                ('Trans Fat', '${n.transFat.toStringAsFixed(1)}g', Color(0xFFFF8C42)),
+                ('Cholesterol', '${n.cholesterol.round()}mg', Color(0xFFFFD93D)),
+              ]),
+              const SizedBox(height: 10),
+              _nutrientGrid([
+                ('Potassium', '${n.potassium.round()}mg', Color(0xFF6BCB77)),
+                ('Magnesium', '${n.magnesium.round()}mg', Color(0xFF4D96FF)),
+                ('Zinc', '${n.zinc.toStringAsFixed(1)}mg', Color(0xFFB19CD9)),
+              ]),
+              const SizedBox(height: 10),
+              _nutrientGrid([
+                ('Vit A', '${n.vitaminA.round()}mcg', Color(0xFFFF6B9D)),
+                ('Vit B6', '${n.vitaminB6.toStringAsFixed(2)}mg', Color(0xFFC7CEEA)),
+                ('Vit B12', '${n.vitaminB12.toStringAsFixed(2)}mcg', Color(0xFFB5EAD7)),
+              ]),
+              const SizedBox(height: 10),
+              _nutrientGrid([
+                ('Vit D', '${n.vitaminD.toStringAsFixed(1)}mcg', Color(0xFFFBC4AB)),
+                ('Folate', '${n.folate.round()}mcg', Color(0xFFC7CEEA)),
+                ('Calcium', '${n.calcium.round()}mg', Color(0xFFE0BBE4)),
+              ]),
+              const SizedBox(height: 10),
+              _nutrientGrid([
+                ('Phosphorus', '${n.phosphorus.round()}mg', Color(0xFFF8B500)),
+                ('Iron', '${n.iron.toStringAsFixed(2)}mg', Color(0xFFD4A574)),
+              ]),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _nutrientGrid(List<(String label, String value, Color color)> nutrients) {
+    return Row(
+      children: [
+        for (int i = 0; i < nutrients.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E1E1E),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: nutrients[i].$3.withOpacity(0.4)),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    nutrients[i].$1,
+                    style: TextStyle(color: nutrients[i].$3, fontSize: 9, fontWeight: FontWeight.w700),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    nutrients[i].$2,
+                    style: const TextStyle(color: CupertinoColors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 

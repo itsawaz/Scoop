@@ -1,10 +1,14 @@
-# calorie_deficit
+# Scoop
 
-A new Flutter project.
+A personal nutrition and fitness tracking app built with Flutter.
 
-## Getting Started
+## Features
 
-This project is a starting point for a Flutter application.
+- Track daily meals and calories
+- Log supplements and macros
+- Monitor nutrition goals
+- Connect to Apple Health
+- AI-powered coaching
 
 A few resources to get you started if this is your first Flutter project:
 

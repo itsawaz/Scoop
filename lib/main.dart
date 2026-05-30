@@ -22,12 +22,12 @@ class CalorieApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CupertinoApp(
-      title: 'NutriAI',
+      title: 'Hoop',
       debugShowCheckedModeBanner: false,
       theme: const CupertinoThemeData(
         brightness: Brightness.dark,
-        primaryColor: Color(0xFFE5FF00),
-        scaffoldBackgroundColor: Color(0xFF0A0A0A),
+        primaryColor: Color(0xFFCDFF3C),
+        scaffoldBackgroundColor: Color(0xFF050508),
       ),
       home: startOnboarded ? const MainTabScreen() : const OnboardingScreen(),
     );
