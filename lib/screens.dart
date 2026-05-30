@@ -1039,14 +1039,19 @@ class AllHealthScreen extends StatelessWidget {
                   color: kNeon, fillFraction: (health.steps / 10000).clamp(0.0, 1.0),
                   onTap: () => Navigator.push(context, CupertinoPageRoute(builder: (_) => HealthDetailScreen(health: health, metricKey: 'steps', label: 'Steps', color: kNeon))),
                 ),
-                ...health.extendedMetrics.entries.map((e) => StatTile(
-                  label: e.key.toUpperCase(),
-                  value: '${e.value['value']}',
-                  unit: e.value['unit'],
-                  color: CupertinoColors.systemGrey3,
-                  fillFraction: 0.5,
-                  onTap: () => Navigator.push(context, CupertinoPageRoute(builder: (_) => HealthDetailScreen(health: health, metricKey: 'extended:${e.key}', label: e.key, color: CupertinoColors.systemGrey3))),
-                )),
+                ...health.extendedMetrics.entries.map((e) {
+                  final metricData = e.value as Map<String, dynamic>?;
+                  if (metricData == null) return const SizedBox.shrink();
+                  
+                  return StatTile(
+                    label: e.key.toUpperCase(),
+                    value: '${metricData['value'] ?? ''}',
+                    unit: metricData['unit'] ?? '',
+                    color: CupertinoColors.systemGrey3,
+                    fillFraction: 0.5,
+                    onTap: () => Navigator.push(context, CupertinoPageRoute(builder: (_) => HealthDetailScreen(health: health, metricKey: 'extended:${e.key}', label: e.key, color: CupertinoColors.systemGrey3))),
+                  );
+                }),
               ],
             ),
           ],

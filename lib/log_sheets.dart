@@ -8,6 +8,7 @@ import 'models.dart';
 import 'widgets.dart';
 import 'services/storage_service.dart';
 import 'services/health_service.dart';
+import 'services/api_service.dart';
 import 'state.dart';
 
 // ==========================================
@@ -402,11 +403,6 @@ class _SupplementLogSheetState extends State<_SupplementLogSheet> {
     super.dispose();
   }
 
-  Future<String?> _getApiKey() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('api_key');
-  }
-
   // --- SEARCH BY NAME ---
   Future<void> _searchByName() async {
     final name = _searchCtrl.text.trim();
@@ -414,15 +410,11 @@ class _SupplementLogSheetState extends State<_SupplementLogSheet> {
     FocusScope.of(context).unfocus();
     setState(() { _isBusy = true; _searchResult = null; });
 
-    final apiKey = await _getApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
-      setState(() => _isBusy = false);
-      _showError('Set your Gemini API key in Profile first.');
-      return;
-    }
-
-    final model = GenerativeModel(model: 'gemini-2.5-flash', apiKey: apiKey);
-    final prompt = '''
+    try {
+      final apiService = ApiService();
+      final model = await apiService.getModel('supplement_lookup');
+      
+      final prompt = '''
 Lookup nutritional information for this supplement product: "$name"
 Return ONLY this JSON (no markdown):
 {
@@ -437,8 +429,10 @@ Return ONLY this JSON (no markdown):
 }
 If the product is not recognizable, set "found": false and estimate based on the category.
 ''';
-    try {
+      
       final response = await model.generateContent([Content.text(prompt)]);
+      await apiService.recordUsage();
+      
       final raw = response.text?.trim() ?? '{}';
       String jsonStr = raw.replaceAll(RegExp(r'```json|```'), '').trim();
       final first = jsonStr.indexOf('{');
@@ -472,17 +466,12 @@ If the product is not recognizable, set "found": false and estimate based on the
     if (picked == null) return;
     setState(() { _scannedImage = picked; _isBusy = true; _scanResult = null; });
 
-    final apiKey = await _getApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
-      setState(() => _isBusy = false);
-      _showError('Set your Gemini API key in Profile first.');
-      return;
-    }
+    try {
+      final apiService = ApiService();
+      final model = await apiService.getModel('supplement_lookup', hasImage: true);
+      final bytes = await File(picked.path).readAsBytes();
 
-    final model = GenerativeModel(model: 'gemini-2.5-flash', apiKey: apiKey);
-    final bytes = await File(picked.path).readAsBytes();
-
-    final prompt = '''
+      final prompt = '''
 This is a nutrition label from a supplement product.
 Extract the nutritional information per serving and return ONLY this JSON:
 {
@@ -495,13 +484,15 @@ Extract the nutritional information per serving and return ONLY this JSON:
   "calories": 120
 }
 ''';
-    try {
+      
       final response = await model.generateContent([
         Content.multi([
           TextPart(prompt),
           DataPart('image/jpeg', bytes),
         ])
       ]);
+      await apiService.recordUsage();
+      
       final raw = response.text?.trim() ?? '{}';
       String jsonStr = raw.replaceAll(RegExp(r'```json|```'), '').trim();
       final first = jsonStr.indexOf('{');

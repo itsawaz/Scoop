@@ -10,6 +10,8 @@ import 'widgets.dart';
 import 'tabs.dart';
 import 'services/goal_engine.dart';
 import 'services/health_service.dart';
+import 'services/api_key_manager.dart';
+import 'widgets/api_usage_indicator.dart';
 
 
 // ==========================================
@@ -410,7 +412,7 @@ class _ApiKeyScreenState extends State<ApiKeyScreen> {
       
       // Validate API key
       try {
-        final testModel = GenerativeModel(model: 'gemini-2.5-flash', apiKey: apiKey);
+        final testModel = GenerativeModel(model: 'gemini-2.5-flash-lite', apiKey: apiKey);
         await testModel.generateContent([Content.text("hi")]);
       } catch (e) {
         if (mounted) {
@@ -522,6 +524,8 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _nameCtrl = TextEditingController();
   final _apiCtrl = TextEditingController();
+  final _apiCtrl2 = TextEditingController();
+  final _apiCtrl3 = TextEditingController();
   
   // Biometrics
   final _heightCtrl = TextEditingController();
@@ -533,6 +537,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _unitSystem = 'metric';
 
   bool _showApiKey = false;
+  bool _showApiKey2 = false;
+  bool _showApiKey3 = false;
   bool _isRecalculating = false;
   bool _autoRecalculate = false;
   bool _healthConnected = false;
@@ -615,11 +621,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final prefs = await SharedPreferences.getInstance();
     final name = prefs.getString('name') ?? 'Bestie';
     final apiKey = prefs.getString('api_key') ?? '';
+    final apiKey2 = prefs.getString('api_key_2') ?? '';
+    final apiKey3 = prefs.getString('api_key_3') ?? '';
     final condStr = prefs.getString('conditions') ?? 'None';
     final goalStr = prefs.getString('goals') ?? '';
 
     _nameCtrl.text = name;
     _apiCtrl.text = apiKey;
+    _apiCtrl2.text = apiKey2;
+    _apiCtrl3.text = apiKey3;
     _heightCtrl.text = (prefs.getDouble('height_cm') ?? 170.0).toStringAsFixed(0);
     _weightCtrl.text = (prefs.getDouble('weight_kg') ?? 70.0).toStringAsFixed(1);
     _goalWeightCtrl.text = (prefs.getDouble('goal_weight_kg') ?? 70.0).toStringAsFixed(1);
@@ -643,6 +653,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('name', _nameCtrl.text.trim().isEmpty ? 'Bestie' : _nameCtrl.text.trim());
     await prefs.setString('api_key', _apiCtrl.text.trim());
+    await prefs.setString('api_key_2', _apiCtrl2.text.trim());
+    await prefs.setString('api_key_3', _apiCtrl3.text.trim());
     final conds = _selectedConditions.where((c) => c != 'None').join(', ');
     await prefs.setString('conditions', conds.isEmpty ? 'None' : conds);
     await prefs.setString('goals', _selectedGoals.join(', '));
@@ -655,6 +667,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await prefs.setString('activity_level', _activity);
     await prefs.setString('unit_system', _unitSystem);
     await prefs.setBool('auto_recalculate', _autoRecalculate);
+
+    // Reload API keys in the manager
+    await ApiKeyManager().loadApiKeys();
 
     if (mounted) {
       showCupertinoDialog(
@@ -763,28 +778,126 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 14),
 
-              // API KEY
+              // API KEYS SECTION
+              const ApiUsageIndicator(),
+              const SizedBox(height: 14),
+              
               BentoCard(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('GEMINI API KEY', style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1)),
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    Expanded(
-                      child: CupertinoTextField(
-                        controller: _apiCtrl,
-                        placeholder: 'AIzaSy...',
-                        obscureText: !_showApiKey,
-                        textInputAction: TextInputAction.done,
-                        style: const TextStyle(color: CupertinoColors.white, fontSize: 14),
-                        decoration: const BoxDecoration(),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('PRIMARY API KEY', style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1)),
+                      CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        onPressed: () => setState(() => _showApiKey = !_showApiKey),
+                        child: Icon(_showApiKey ? CupertinoIcons.eye_slash : CupertinoIcons.eye, color: CupertinoColors.systemGrey, size: 18),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  CupertinoTextField(
+                    controller: _apiCtrl,
+                    placeholder: 'AIzaSy...',
+                    obscureText: !_showApiKey,
+                    textInputAction: TextInputAction.done,
+                    style: const TextStyle(color: CupertinoColors.white, fontSize: 14),
+                    decoration: const BoxDecoration(),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: kTeal.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    CupertinoButton(
-                      padding: const EdgeInsets.only(left: 8),
-                      onPressed: () => setState(() => _showApiKey = !_showApiKey),
-                      child: Icon(_showApiKey ? CupertinoIcons.eye_slash : CupertinoIcons.eye, color: CupertinoColors.systemGrey, size: 20),
-                    )
-                  ]),
+                    child: Row(
+                      children: [
+                        Icon(CupertinoIcons.info_circle, color: kTeal, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Get your free API key from aistudio.google.com',
+                            style: TextStyle(color: kTeal, fontSize: 11),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 14),
+
+              // BACKUP API KEY 2
+              BentoCard(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('BACKUP API KEY 2 (OPTIONAL)', style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1)),
+                      CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        onPressed: () => setState(() => _showApiKey2 = !_showApiKey2),
+                        child: Icon(_showApiKey2 ? CupertinoIcons.eye_slash : CupertinoIcons.eye, color: CupertinoColors.systemGrey, size: 18),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  CupertinoTextField(
+                    controller: _apiCtrl2,
+                    placeholder: 'AIzaSy... (from different project)',
+                    obscureText: !_showApiKey2,
+                    textInputAction: TextInputAction.done,
+                    style: const TextStyle(color: CupertinoColors.white, fontSize: 14),
+                    decoration: const BoxDecoration(),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 14),
+
+              // BACKUP API KEY 3
+              BentoCard(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('BACKUP API KEY 3 (OPTIONAL)', style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1)),
+                      CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        onPressed: () => setState(() => _showApiKey3 = !_showApiKey3),
+                        child: Icon(_showApiKey3 ? CupertinoIcons.eye_slash : CupertinoIcons.eye, color: CupertinoColors.systemGrey, size: 18),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  CupertinoTextField(
+                    controller: _apiCtrl3,
+                    placeholder: 'AIzaSy... (from different project)',
+                    obscureText: !_showApiKey3,
+                    textInputAction: TextInputAction.done,
+                    style: const TextStyle(color: CupertinoColors.white, fontSize: 14),
+                    decoration: const BoxDecoration(),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: kNeon.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(CupertinoIcons.lightbulb, color: kNeon, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Add 2-3 API keys from different Google Cloud projects to multiply your daily limit to 2,000-3,000 requests/day',
+                            style: TextStyle(color: kNeon, fontSize: 11),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ]),
               ),
               const SizedBox(height: 14),

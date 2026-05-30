@@ -8,6 +8,7 @@ import 'models.dart';
 import 'widgets.dart';
 import 'services/storage_service.dart';
 import 'services/streak_service.dart';
+import 'services/api_service.dart';
 import 'state.dart';
 
 class ChatMessage {
@@ -33,8 +34,7 @@ class _LogMealScreenState extends State<LogMealScreen> {
   bool _showExtendedNutrients = false;
   final List<ChatMessage> _chatHistory = [];
   NutritionData? _latestNutrition;
-  GenerativeModel? _model;
-  String _apiKey = '';
+  final ApiService _apiService = ApiService();
   String _conditions = '';
   String _goals = '';
 
@@ -46,10 +46,9 @@ class _LogMealScreenState extends State<LogMealScreen> {
 
   Future<void> _initAI() async {
     final prefs = await SharedPreferences.getInstance();
-    _apiKey = prefs.getString('api_key') ?? '';
     _conditions = prefs.getString('conditions') ?? 'None';
     _goals = prefs.getString('goals') ?? 'None';
-    _model = GenerativeModel(model: 'gemini-2.5-flash', apiKey: _apiKey);
+    // API service will handle model selection and key rotation
   }
 
   Future<void> _pickImage(ImageSource source) async {
@@ -101,6 +100,17 @@ Return ONLY the JSON. No markdown. No backticks. No extra text.
     setState(() { _isAnalyzing = true; _chatStarted = true; });
 
     try {
+      // Check if API is available
+      if (!await _apiService.isAvailable()) {
+        final statusMsg = await _apiService.getStatusMessage();
+        _chatHistory.add(ChatMessage(role: 'ai', text: statusMsg));
+        setState(() => _isAnalyzing = false);
+        return;
+      }
+
+      // Get model for meal analysis
+      final model = await _apiService.getModel('meal_analysis', hasImage: _image != null);
+      
       final prompt = TextPart("${_buildSystemPrompt()}\n\nUser description: ${_descController.text}");
       final List<Part> parts = [prompt];
       if (_image != null) {
@@ -108,7 +118,11 @@ Return ONLY the JSON. No markdown. No backticks. No extra text.
         parts.add(DataPart('image/jpeg', bytes));
       }
 
-      final response = await _model!.generateContent([Content.multi(parts)]);
+      final response = await model.generateContent([Content.multi(parts)]);
+      
+      // Record usage
+      await _apiService.recordUsage();
+      
       final raw = response.text?.trim() ?? '{}';
       await _processResponse(raw, isFirstTime: true);
     } catch (e) {
@@ -165,7 +179,13 @@ Return ONLY a valid JSON object with EXACTLY these keys (no others):
 Do NOT wrap in backticks. Do NOT add extra keys. Return raw JSON only.
 """;
     try {
-      final response = await _model!.generateContent([Content.text(newPrompt)]);
+      // Get model for meal analysis
+      final model = await _apiService.getModel('meal_analysis');
+      final response = await model.generateContent([Content.text(newPrompt)]);
+      
+      // Record usage
+      await _apiService.recordUsage();
+      
       final raw = response.text?.trim() ?? '{}';
       await _processResponse(raw, isFirstTime: false);
     } catch (e) {

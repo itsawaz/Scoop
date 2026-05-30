@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show Slider, SliderTheme, SliderThemeData, Material, MaterialType, Colors;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -667,9 +668,10 @@ class HealthDetailScreen extends StatelessWidget {
       value = '${health.mindfulMinutes.round()}'; unit = 'min'; fill = (health.mindfulMinutes / 30.0).clamp(0.0, 1.0);
     } else if (metricKey.startsWith('extended:')) {
       final k = metricKey.split(':').length > 1 ? metricKey.split(':')[1] : metricKey;
-      final ext = health.extendedMetrics[k];
+      final ext = health.extendedMetrics[k] as Map<String, dynamic>?;
       if (ext != null) {
-        value = '${ext['value']}'; unit = ext['unit'] ?? '';
+        value = '${ext['value'] ?? ''}'; 
+        unit = ext['unit'] ?? '';
       }
     }
 
@@ -708,24 +710,93 @@ class HealthDetailScreen extends StatelessWidget {
             if (metricKey == 'active_burn') ...[
               const SectionHeader(title: 'Breakdown'),
               BentoCard(padding: const EdgeInsets.all(12), child: Column(children: [
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Active', style: const TextStyle(color: CupertinoColors.systemGrey)), Text('${health.activeCals.round()} kcal', style: TextStyle(color: color, fontWeight: FontWeight.bold))]),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('Active', style: const TextStyle(color: CupertinoColors.systemGrey)), 
+                  Text('${health.activeCals.round()} kcal', style: TextStyle(color: color, fontWeight: FontWeight.bold))
+                ]),
                 const SizedBox(height: 8),
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Resting', style: const TextStyle(color: CupertinoColors.systemGrey)), Text('${health.basalCals.round()} kcal', style: TextStyle(color: const Color(0xFF8B5CF6), fontWeight: FontWeight.bold))]),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('Resting', style: const TextStyle(color: CupertinoColors.systemGrey)), 
+                  Text('${health.basalCals.round()} kcal${health.basalIsEstimated ? ' (est)' : ''}', style: const TextStyle(color: Color(0xFF8B5CF6), fontWeight: FontWeight.bold))
+                ]),
               ])),
+              const SizedBox(height: 16),
+            ],
+            
+            if (metricKey == 'resting_burn') ...[
+              const SectionHeader(title: 'About Resting Burn'),
+              BentoCard(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                  health.basalIsEstimated 
+                    ? 'This is an estimated value based on time elapsed today. For accurate tracking, use an Apple Watch or manually enter your BMR in the Health app.'
+                    : 'This data comes from Apple Health. Resting burn is the calories your body burns at rest (BMR).',
+                  style: const TextStyle(color: CupertinoColors.systemGrey, fontSize: 13, height: 1.4),
+                ),
+              ])),
+              const SizedBox(height: 16),
+            ],
+            
+            if (metricKey == 'health_score') ...[
+              const SectionHeader(title: 'Score Breakdown'),
+              BentoCard(padding: const EdgeInsets.all(12), child: Column(children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('Steps', style: const TextStyle(color: CupertinoColors.systemGrey)), 
+                  Text(health.steps > 10000 ? '+30' : health.steps > 5000 ? '+15' : health.steps < 3000 ? '-10' : '0', style: const TextStyle(color: kNeon, fontWeight: FontWeight.bold))
+                ]),
+                const SizedBox(height: 8),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('Sleep', style: const TextStyle(color: CupertinoColors.systemGrey)), 
+                  Text(health.sleepHours >= 7 && health.sleepHours <= 9 ? '+20' : health.sleepHours >= 6 ? '+10' : health.sleepHours > 0 && health.sleepHours < 5 ? '-15' : '0', style: const TextStyle(color: Color(0xFF5E5CE6), fontWeight: FontWeight.bold))
+                ]),
+                const SizedBox(height: 8),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('Mindfulness', style: const TextStyle(color: CupertinoColors.systemGrey)), 
+                  Text(health.mindfulMinutes > 10 ? '+10' : '0', style: TextStyle(color: kTeal, fontWeight: FontWeight.bold))
+                ]),
+              ])),
+              const SizedBox(height: 16),
+            ],
+            
+            if (metricKey == 'steps') ...[
+              const SectionHeader(title: 'Daily Goal'),
+              BentoCard(padding: const EdgeInsets.all(12), child: Column(children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('Current', style: const TextStyle(color: CupertinoColors.systemGrey)), 
+                  Text('${health.steps}', style: TextStyle(color: color, fontWeight: FontWeight.bold))
+                ]),
+                const SizedBox(height: 8),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('Goal', style: const TextStyle(color: CupertinoColors.systemGrey)), 
+                  Text('10,000', style: const TextStyle(color: CupertinoColors.white, fontWeight: FontWeight.bold))
+                ]),
+                const SizedBox(height: 8),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('Remaining', style: const TextStyle(color: CupertinoColors.systemGrey)), 
+                  Text('${math.max(0, 10000 - health.steps)}', style: const TextStyle(color: CupertinoColors.systemGrey2, fontWeight: FontWeight.bold))
+                ]),
+              ])),
+              const SizedBox(height: 16),
             ],
 
-            // Show list of extended metrics
-            const SectionHeader(title: 'More Metrics'),
-            BentoCard(padding: const EdgeInsets.all(12), child: Column(children: [
-              ...health.extendedMetrics.entries.map((e) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  Expanded(child: Text(e.key, style: const TextStyle(color: CupertinoColors.white, fontSize: 13))),
-                  const SizedBox(width: 8),
-                  Text('${e.value['value']} ${e.value['unit']}', style: const TextStyle(color: CupertinoColors.systemGrey, fontSize: 13)),
-                ]),
-              )),
-            ])),
+            // Show list of extended metrics only if they exist
+            if (health.extendedMetrics.isNotEmpty) ...[
+              const SectionHeader(title: 'More Metrics'),
+              BentoCard(padding: const EdgeInsets.all(12), child: Column(children: [
+                ...health.extendedMetrics.entries.map((e) {
+                  final metricData = e.value as Map<String, dynamic>?;
+                  if (metricData == null) return const SizedBox.shrink();
+                  
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Expanded(child: Text(e.key, style: const TextStyle(color: CupertinoColors.white, fontSize: 13))),
+                      const SizedBox(width: 8),
+                      Text('${metricData['value'] ?? ''} ${metricData['unit'] ?? ''}', style: const TextStyle(color: CupertinoColors.systemGrey, fontSize: 13)),
+                    ]),
+                  );
+                }),
+              ])),
+            ],
           ],
         ),
       ),

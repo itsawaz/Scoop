@@ -1,6 +1,9 @@
 import 'package:health/health.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
+import '../models.dart';
 
 class HealthSnapshot {
   final int steps;
@@ -12,6 +15,12 @@ class HealthSnapshot {
   
   // Extended metrics for Apple Watch/iPhone tracking
   final Map<String, dynamic> extendedMetrics;
+  
+  // Flag to indicate if basal calories are estimated vs actual from HealthKit
+  final bool basalIsEstimated;
+  
+  // BMR (Basal Metabolic Rate) for real-time calorie increment calculation
+  final double bmr;
 
   HealthSnapshot({
     this.steps = 0,
@@ -20,6 +29,8 @@ class HealthSnapshot {
     this.sleepHours = 0,
     this.mindfulMinutes = 0,
     this.extendedMetrics = const {},
+    this.basalIsEstimated = false,
+    this.bmr = 2400.0,
     DateTime? fetchedAt,
   }) : fetchedAt = fetchedAt ?? DateTime.now();
 
@@ -30,6 +41,8 @@ class HealthSnapshot {
     double? sleepHours,
     double? mindfulMinutes,
     Map<String, dynamic>? extendedMetrics,
+    bool? basalIsEstimated,
+    double? bmr,
     DateTime? fetchedAt,
   }) {
     return HealthSnapshot(
@@ -39,6 +52,8 @@ class HealthSnapshot {
       sleepHours: sleepHours ?? this.sleepHours,
       mindfulMinutes: mindfulMinutes ?? this.mindfulMinutes,
       extendedMetrics: extendedMetrics ?? this.extendedMetrics,
+      basalIsEstimated: basalIsEstimated ?? this.basalIsEstimated,
+      bmr: bmr ?? this.bmr,
       fetchedAt: fetchedAt ?? this.fetchedAt,
     );
   }
@@ -75,6 +90,11 @@ class HealthService {
   DateTime? _lastBasalAt;
   double _lastBasalRatePerMin = 0;
   
+  // Estimated daily basal metabolic rate (calories per day)
+  // Will be loaded from user's biometric profile
+  double _estimatedDailyBMR = 2400.0;
+  bool _bmrLoaded = false;
+  
   // Real-time streaming for calorie data
   StreamController<HealthSnapshot>? _calorieStreamController;
   Timer? _calorieRefreshTimer;
@@ -84,6 +104,60 @@ class HealthService {
       Health().configure();
       _isConfigured = true;
     }
+  }
+  
+  /// Load user's BMR from their biometric profile
+  Future<void> _loadUserBMR() async {
+    if (_bmrLoaded) return;
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final profileStr = prefs.getString('profile');
+      
+      if (profileStr != null) {
+        final profile = BiometricProfile.fromJson(jsonDecode(profileStr));
+        _estimatedDailyBMR = profile.bmr;
+        _bmrLoaded = true;
+        print('[HealthService] Loaded user BMR from profile: ${_estimatedDailyBMR.toStringAsFixed(0)} cal/day');
+      } else {
+        // Fallback: try to calculate from individual fields
+        final heightCm = prefs.getDouble('height_cm');
+        final weightKg = prefs.getDouble('weight_kg');
+        final age = prefs.getInt('age');
+        final gender = prefs.getString('gender');
+        
+        if (heightCm != null && weightKg != null && age != null && gender != null) {
+          // Mifflin-St Jeor Equation
+          if (gender == 'male') {
+            _estimatedDailyBMR = 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
+          } else {
+            _estimatedDailyBMR = 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
+          }
+          _bmrLoaded = true;
+          print('[HealthService] Calculated user BMR: ${_estimatedDailyBMR.toStringAsFixed(0)} cal/day');
+        } else {
+          print('[HealthService] No profile data found, using default BMR: 2400 cal/day');
+        }
+      }
+    } catch (e) {
+      print('[HealthService] Error loading BMR: $e, using default: 2400 cal/day');
+    }
+  }
+  
+  /// Set the estimated daily BMR for fallback calculation
+  /// This is used when Apple Health doesn't have basal energy data
+  void setEstimatedDailyBMR(double caloriesPerDay) {
+    _estimatedDailyBMR = caloriesPerDay;
+    _bmrLoaded = true;
+    print('[HealthService] Estimated daily BMR set to: ${caloriesPerDay.toStringAsFixed(0)} cal/day');
+  }
+  
+  /// Calculate estimated basal calories burned since midnight based on time elapsed
+  double _calculateEstimatedBasalCalories(DateTime midnight, DateTime now) {
+    final secondsSinceMidnight = now.difference(midnight).inSeconds;
+    final caloriesPerSecond = _estimatedDailyBMR / 86400.0; // 86400 seconds in a day
+    final estimatedBasal = caloriesPerSecond * secondsSinceMidnight;
+    return estimatedBasal;
   }
 
   List<HealthDataPoint> _dedupePoints(List<HealthDataPoint> points) {
@@ -96,6 +170,38 @@ class HealthService {
       }
     }
     return deduped;
+  }
+
+  /// Fetch energy data using getHealthDataFromTypes
+  /// Note: On iOS, basal energy data may not be available unless:
+  /// - User has an Apple Watch with metabolic tracking enabled
+  /// - User has manually entered basal energy data
+  /// - A third-party app has shared basal energy data
+  Future<List<HealthDataPoint>> _fetchEnergyData({
+    required HealthDataType type,
+    required DateTime startTime,
+    required DateTime endTime,
+  }) async {
+    try {
+      print('[HealthService] Fetching $type from $startTime to $endTime');
+      final result = await Health().getHealthDataFromTypes(
+        types: [type],
+        startTime: startTime,
+        endTime: endTime,
+      );
+      
+      print('[HealthService] Received ${result.length} data points for $type');
+      if (result.isNotEmpty) {
+        for (var point in result.take(3)) {
+          print('[HealthService]   - ${point.value} from ${point.sourceName} (${point.sourceId})');
+        }
+      }
+      
+      return result;
+    } catch (e) {
+      print('[HealthService] Error fetching energy data for $type: $e');
+      return [];
+    }
   }
 
   static const _readTypes = [
@@ -162,11 +268,28 @@ class HealthService {
         }
       }
       
+      print('[HealthService] Requesting permissions for ${types.length} health data types');
+      print('[HealthService] Including: ACTIVE_ENERGY_BURNED, BASAL_ENERGY_BURNED, STEPS');
+      
       bool authorized = await Health().requestAuthorization(types, permissions: permissions);
       _isRequestingPermissions = false;
       _permissionsRequested = true;
+      
+      print('[HealthService] Authorization result: $authorized');
+      
+      // Check specific permissions
+      try {
+        final hasActive = await Health().hasPermissions([HealthDataType.ACTIVE_ENERGY_BURNED]);
+        final hasBasal = await Health().hasPermissions([HealthDataType.BASAL_ENERGY_BURNED]);
+        final hasSteps = await Health().hasPermissions([HealthDataType.STEPS]);
+        print('[HealthService] Permission check - Active: $hasActive, Basal: $hasBasal, Steps: $hasSteps');
+      } catch (e) {
+        print('[HealthService] Could not check individual permissions: $e');
+      }
+      
       return authorized;
     } catch (e) {
+      print('[HealthService] Error requesting permissions: $e');
       _isRequestingPermissions = false;
       _permissionsRequested = true;
       return false;
@@ -241,6 +364,7 @@ class HealthService {
     int steps = 0;
     double activeCals = 0;
     double basalCals = 0;
+    bool basalIsEstimated = false;
     
     try {
       if (_verboseHealthLogs) {
@@ -252,29 +376,24 @@ class HealthService {
         print('[HealthService] Steps fetched: $steps');
       }
       
-      var todayData = await Health().getHealthDataFromTypes(
-        types: [
-          HealthDataType.ACTIVE_ENERGY_BURNED,
-          HealthDataType.BASAL_ENERGY_BURNED,
-        ],
+      // Use getIntervalData for energy data - this uses HKStatisticsCollectionQuery
+      // which is more reliable for getting cumulative energy data on iOS
+      final activePoints = await _fetchEnergyData(
+        type: HealthDataType.ACTIVE_ENERGY_BURNED,
         startTime: midnight,
         endTime: now,
       );
+      final basalPoints = await _fetchEnergyData(
+        type: HealthDataType.BASAL_ENERGY_BURNED,
+        startTime: midnight,
+        endTime: now,
+      );
+      
       if (_verboseHealthLogs) {
-        print('[HealthService] Total health data points: ${todayData.length}');
+        print('[HealthService] Active energy points: ${activePoints.length}');
+        print('[HealthService] Basal energy points: ${basalPoints.length}');
       }
       
-      // Apple Health active energy samples can be tiny (e.g. 0.05 kcal) and frequent.
-      // removeDuplicates aggressively drops them if they match in value and time!
-      // We skip removeDuplicates here to avoid zeroing out active energy.
-      
-      final activePoints = _dedupePoints(
-        todayData.where((d) => d.type == HealthDataType.ACTIVE_ENERGY_BURNED).toList(),
-      );
-      final basalPoints = _dedupePoints(
-        todayData.where((d) => d.type == HealthDataType.BASAL_ENERGY_BURNED).toList(),
-      );
-
       final activeBySource = <String, double>{};
       final basalBySource = <String, double>{};
 
@@ -284,7 +403,7 @@ class HealthService {
         final key = '${data.sourceName} (${data.sourceId})';
         activeBySource[key] = (activeBySource[key] ?? 0) + val;
         if (_verboseHealthLogs) {
-          print('[HealthService] Active energy point: ${(data.value as NumericHealthValue).numericValue} (cumulative: $activeCals)');
+          print('[HealthService] Active energy point: $val (cumulative: $activeCals)');
         }
       }
       for (var data in basalPoints) {
@@ -293,25 +412,42 @@ class HealthService {
         final key = '${data.sourceName} (${data.sourceId})';
         basalBySource[key] = (basalBySource[key] ?? 0) + val;
         if (_verboseHealthLogs) {
-          print('[HealthService] Basal energy point: ${(data.value as NumericHealthValue).numericValue} (cumulative: $basalCals)');
+          print('[HealthService] Basal energy point: $val (cumulative: $basalCals)');
         }
       }
 
       // If Health data is slow to update, interpolate resting calories in real time.
       final minutesSinceMidnight = math.max(1, now.difference(midnight).inMinutes);
+      bool basalIsEstimated = false;
+      
       if (basalCals > 0) {
         _lastBasalRatePerMin = basalCals / minutesSinceMidnight;
         _lastBasalCals = basalCals;
         _lastBasalAt = now;
       } else if (_lastBasalAt != null && _lastBasalRatePerMin > 0) {
+        // Interpolate from last known value
         final elapsedMin = now.difference(_lastBasalAt!).inMinutes;
         final estimated = _lastBasalCals + (_lastBasalRatePerMin * elapsedMin);
         if (estimated > basalCals) {
           basalCals = estimated;
+          basalIsEstimated = true;
         }
+      } else {
+        // No HealthKit data available - use estimated BMR calculation
+        await _loadUserBMR(); // Load user's actual BMR first
+        basalCals = _calculateEstimatedBasalCalories(midnight, now);
+        basalIsEstimated = true;
+        print('[HealthService] Using estimated basal calories: ${basalCals.toStringAsFixed(1)} (${_estimatedDailyBMR.toStringAsFixed(0)} cal/day)');
       }
 
-      print('[HealthService] Totals - Active: ${activeCals.toStringAsFixed(1)}, Basal: ${basalCals.toStringAsFixed(1)}, Steps: $steps | points A:${activePoints.length} B:${basalPoints.length}');
+      // Log detailed information for debugging
+      print('[HealthService] === Health Data Summary ===');
+      print('[HealthService] Active energy points: ${activePoints.length}');
+      print('[HealthService] Basal energy points: ${basalPoints.length}');
+      print('[HealthService] Active calories: ${activeCals.toStringAsFixed(1)}');
+      print('[HealthService] Basal calories: ${basalCals.toStringAsFixed(1)} ${basalIsEstimated ? "(ESTIMATED)" : "(FROM HEALTHKIT)"}');
+      print('[HealthService] Steps: $steps');
+      
       if (activeBySource.isNotEmpty) {
         final parts = activeBySource.entries.map((e) => '${e.key}: ${e.value.toStringAsFixed(1)}').join(' | ');
         print('[HealthService] Active by source -> $parts');
@@ -319,7 +455,11 @@ class HealthService {
       if (basalBySource.isNotEmpty) {
         final parts = basalBySource.entries.map((e) => '${e.key}: ${e.value.toStringAsFixed(1)}').join(' | ');
         print('[HealthService] Basal by source -> $parts');
+      } else if (!basalIsEstimated) {
+        print('[HealthService] WARNING: No basal energy data found in HealthKit!');
+        print('[HealthService] Note: Basal energy requires Apple Watch with metabolic tracking or manual entry');
       }
+      print('[HealthService] ===============================');
       
     } catch (e) {
       print('[HealthService] Error fetching health data: $e');
@@ -329,6 +469,8 @@ class HealthService {
       steps: steps,
       activeCals: activeCals,
       basalCals: basalCals,
+      basalIsEstimated: basalIsEstimated,
+      bmr: _estimatedDailyBMR,
       fetchedAt: DateTime.now(),
     );
   }
@@ -359,26 +501,27 @@ class HealthService {
     double basalCals = 0;
     double sleepHours = 0;
     double mindfulMinutes = 0;
+    bool basalIsEstimated = false;
     
     try {
       steps = await Health().getTotalStepsInInterval(midnight, now) ?? 0;
       
-      var todayData = await Health().getHealthDataFromTypes(
-        types: [
-          HealthDataType.ACTIVE_ENERGY_BURNED,
-          HealthDataType.BASAL_ENERGY_BURNED,
-          HealthDataType.MINDFULNESS,
-        ],
+      // Use getIntervalData for energy data - this uses HKStatisticsCollectionQuery
+      // which is more reliable for getting cumulative energy data on iOS
+      final activePoints = await _fetchEnergyData(
+        type: HealthDataType.ACTIVE_ENERGY_BURNED,
         startTime: midnight,
         endTime: now,
       );
-      // Removed Health().removeDuplicates(todayData) because it wipes active energy
-      
-      final activePoints = _dedupePoints(
-        todayData.where((d) => d.type == HealthDataType.ACTIVE_ENERGY_BURNED).toList(),
+      final basalPoints = await _fetchEnergyData(
+        type: HealthDataType.BASAL_ENERGY_BURNED,
+        startTime: midnight,
+        endTime: now,
       );
-      final basalPoints = _dedupePoints(
-        todayData.where((d) => d.type == HealthDataType.BASAL_ENERGY_BURNED).toList(),
+      final mindfulPoints = await _fetchEnergyData(
+        type: HealthDataType.MINDFULNESS,
+        startTime: midnight,
+        endTime: now,
       );
 
       for (var data in activePoints) {
@@ -387,11 +530,18 @@ class HealthService {
       for (var data in basalPoints) {
         basalCals += (data.value as NumericHealthValue).numericValue.toDouble();
       }
-      for (var data in todayData.where((d) => d.type == HealthDataType.MINDFULNESS)) {
+      for (var data in mindfulPoints) {
         final diff = data.dateTo.difference(data.dateFrom);
         mindfulMinutes += diff.inSeconds / 60.0;
       }
 
+      // Apply fallback basal calculation if no HealthKit data
+      bool basalIsEstimated = false;
+      if (basalCals == 0) {
+        await _loadUserBMR(); // Load user's actual BMR first
+        basalCals = _calculateEstimatedBasalCalories(midnight, now);
+        basalIsEstimated = true;
+      }
 
       // Sleep (check yesterday 6pm to now)
       final sleepStart = DateTime(yesterday.year, yesterday.month, yesterday.day, 18, 0);
@@ -406,8 +556,25 @@ class HealthService {
         sleepHours += diff.inMinutes / 60.0;
       }
 
+      // Log detailed information for debugging
+      print('[HealthService] === Deep Snapshot Summary ===');
+      print('[HealthService] Active energy points: ${activePoints.length}');
+      print('[HealthService] Basal energy points: ${basalPoints.length}');
+      print('[HealthService] Active calories: ${activeCals.toStringAsFixed(1)}');
+      print('[HealthService] Basal calories: ${basalCals.toStringAsFixed(1)} ${basalIsEstimated ? "(ESTIMATED)" : "(FROM HEALTHKIT)"}');
+      print('[HealthService] Steps: $steps');
+      print('[HealthService] Sleep hours: ${sleepHours.toStringAsFixed(2)}');
+      print('[HealthService] Mindful minutes: ${mindfulMinutes.toStringAsFixed(1)}');
+      
+      if (basalPoints.isEmpty && !basalIsEstimated) {
+        print('[HealthService] WARNING: No basal energy data found in HealthKit!');
+        print('[HealthService] Note: Basal energy requires Apple Watch with metabolic tracking or manual entry');
+      }
+      print('[HealthService] ===============================');
+
     } catch (e) {
       // Return whatever we have so far
+      print('[HealthService] Error in fetchDeepSnapshot: $e');
     }
     
     
@@ -481,6 +648,7 @@ class HealthService {
       sleepHours: sleepHours,
       mindfulMinutes: mindfulMinutes,
       extendedMetrics: extended,
+      basalIsEstimated: basalIsEstimated,
     );
     return snapshot;
   }
