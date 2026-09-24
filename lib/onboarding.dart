@@ -626,9 +626,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _apiCtrl.text = apiKey;
     _apiCtrl2.text = apiKey2;
     _apiCtrl3.text = apiKey3;
-    _heightCtrl.text = (prefs.getDouble('height_cm') ?? 170.0).toStringAsFixed(0);
-    _weightCtrl.text = (prefs.getDouble('weight_kg') ?? 70.0).toStringAsFixed(1);
-    _goalWeightCtrl.text = (prefs.getDouble('goal_weight_kg') ?? 70.0).toStringAsFixed(1);
+    // Values are stored canonically in metric; convert for display when the
+    // user's unit system is imperial (kg->lbs, cm->inches).
+    final unitSystem = prefs.getString('unit_system') ?? 'metric';
+    final isImperial = unitSystem == 'imperial';
+    final heightCm = prefs.getDouble('height_cm') ?? 170.0;
+    final weightKg = prefs.getDouble('weight_kg') ?? 70.0;
+    final goalKg = prefs.getDouble('goal_weight_kg') ?? 70.0;
+    _heightCtrl.text = isImperial
+        ? (heightCm / 2.54).toStringAsFixed(0)
+        : heightCm.toStringAsFixed(0);
+    _weightCtrl.text = isImperial
+        ? (weightKg * 2.20462).toStringAsFixed(1)
+        : weightKg.toStringAsFixed(1);
+    _goalWeightCtrl.text = isImperial
+        ? (goalKg * 2.20462).toStringAsFixed(1)
+        : goalKg.toStringAsFixed(1);
     _ageCtrl.text = (prefs.getInt('age') ?? 30).toString();
     
     final loadedConds = condStr.split(', ').map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
@@ -644,6 +657,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
   }
 
+  /// Convert the currently-displayed height/weight fields when the user flips
+  /// the unit toggle, so the numbers stay physically equal (not just relabeled).
+  void _convertUnitFields(String newUnit) {
+    final toImperial = newUnit == 'imperial' && _unitSystem == 'metric';
+    final toMetric = newUnit == 'metric' && _unitSystem == 'imperial';
+
+    double? h = double.tryParse(_heightCtrl.text);
+    double? w = double.tryParse(_weightCtrl.text);
+    double? gw = double.tryParse(_goalWeightCtrl.text);
+
+    if (toImperial) {
+      if (h != null) _heightCtrl.text = (h / 2.54).toStringAsFixed(0);
+      if (w != null) _weightCtrl.text = (w * 2.20462).toStringAsFixed(1);
+      if (gw != null) _goalWeightCtrl.text = (gw * 2.20462).toStringAsFixed(1);
+    } else if (toMetric) {
+      if (h != null) _heightCtrl.text = (h * 2.54).toStringAsFixed(0);
+      if (w != null) _weightCtrl.text = (w / 2.20462).toStringAsFixed(1);
+      if (gw != null) _goalWeightCtrl.text = (gw / 2.20462).toStringAsFixed(1);
+    }
+    setState(() => _unitSystem = newUnit);
+  }
+
   Future<void> _save() async {
     FocusScope.of(context).unfocus();
     final prefs = await SharedPreferences.getInstance();
@@ -655,9 +690,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await prefs.setString('conditions', conds.isEmpty ? 'None' : conds);
     await prefs.setString('goals', _selectedGoals.join(', '));
     
-    await prefs.setDouble('height_cm', double.tryParse(_heightCtrl.text) ?? 170.0);
-    await prefs.setDouble('weight_kg', double.tryParse(_weightCtrl.text) ?? 70.0);
-    await prefs.setDouble('goal_weight_kg', double.tryParse(_goalWeightCtrl.text) ?? 70.0);
+    // Convert imperial input back to canonical metric before saving.
+    final isImperial = _unitSystem == 'imperial';
+    final hInput = double.tryParse(_heightCtrl.text) ?? (isImperial ? 67.0 : 170.0);
+    final wInput = double.tryParse(_weightCtrl.text) ?? (isImperial ? 154.0 : 70.0);
+    final gwInput = double.tryParse(_goalWeightCtrl.text) ?? (isImperial ? 154.0 : 70.0);
+    await prefs.setDouble('height_cm', isImperial ? hInput * 2.54 : hInput);
+    await prefs.setDouble('weight_kg', isImperial ? wInput / 2.20462 : wInput);
+    await prefs.setDouble('goal_weight_kg', isImperial ? gwInput / 2.20462 : gwInput);
     await prefs.setInt('age', int.tryParse(_ageCtrl.text) ?? 30);
     await prefs.setString('gender', _gender);
     await prefs.setString('activity_level', _activity);
@@ -948,7 +988,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     CupertinoSlidingSegmentedControl<String>(
                       groupValue: _unitSystem,
                       children: const {'metric': Text('  Metric  ', style: TextStyle(fontSize: 12)), 'imperial': Text(' Imperial ', style: TextStyle(fontSize: 12))},
-                      onValueChanged: (v) => setState(() => _unitSystem = v!),
+                      onValueChanged: (v) {
+                        if (v == null || v == _unitSystem) return;
+                        _convertUnitFields(v);
+                      },
                     ),
                   ]),
                   const SizedBox(height: 16),
@@ -956,13 +999,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Row(children: [
                     Expanded(child: _buildBioField('AGE', _ageCtrl)),
                     const SizedBox(width: 10),
-                    Expanded(child: _buildBioField('HEIGHT', _heightCtrl)),
+                    Expanded(child: _buildBioField(_unitSystem == 'imperial' ? 'HEIGHT (in)' : 'HEIGHT (cm)', _heightCtrl)),
                   ]),
                   const SizedBox(height: 10),
                   Row(children: [
-                    Expanded(child: _buildBioField('WEIGHT', _weightCtrl)),
+                    Expanded(child: _buildBioField(_unitSystem == 'imperial' ? 'WEIGHT (lbs)' : 'WEIGHT (kg)', _weightCtrl)),
                     const SizedBox(width: 10),
-                    Expanded(child: _buildBioField('GOAL WT', _goalWeightCtrl)),
+                    Expanded(child: _buildBioField(_unitSystem == 'imperial' ? 'GOAL WT (lbs)' : 'GOAL WT (kg)', _goalWeightCtrl)),
                   ]),
                   
                   const SizedBox(height: 16),
