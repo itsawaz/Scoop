@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/sync_config.dart';
+import 'auth_service.dart';
 import 'turso_client.dart';
 
 /// Cloud sync so a user's data survives reinstalls (e.g. the 7-day iOS
@@ -52,10 +53,15 @@ class TursoSyncService {
   TursoClient? _client() =>
       SyncConfig.tursoEnabled ? TursoClient.fromConfig() : null;
 
-  /// Stable per-user id, created once and reused across reinstalls only if the
-  /// user restores it. Since reinstalls wipe local storage, the id is derived
-  /// from a user-visible recovery code (see [ensureUserId]).
+  /// The id used to partition this user's rows in Turso.
+  ///
+  /// When the user is signed in via [AuthService], their authenticated account
+  /// id is the source of truth (so data follows the account across devices and
+  /// reinstalls). Otherwise we fall back to a local anonymous id.
   Future<String> ensureUserId() async {
+    final authId = AuthService().currentUserId;
+    if (authId != null && authId.isNotEmpty) return authId;
+
     final prefs = await SharedPreferences.getInstance();
     var id = prefs.getString(_userIdKey);
     if (id == null || id.isEmpty) {
@@ -66,6 +72,8 @@ class TursoSyncService {
   }
 
   Future<String?> currentUserId() async {
+    final authId = AuthService().currentUserId;
+    if (authId != null && authId.isNotEmpty) return authId;
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_userIdKey);
   }

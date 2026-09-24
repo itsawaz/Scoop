@@ -1,9 +1,8 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'widgets.dart';
-import 'onboarding.dart';
-import 'tabs.dart';
-import 'services/turso_sync_service.dart';
+import 'auth_screen.dart';
 
 const String kConsentPrefKey = 'data_consent_accepted';
 
@@ -30,14 +29,11 @@ class _ConsentScreenState extends State<ConsentScreen> {
     setState(() => _working = true);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(kConsentPrefKey, true);
-    // Establish the stable per-user id used for cloud sync + training data.
-    await TursoSyncService().ensureUserId();
     if (!mounted) return;
+    // After consent, require login/signup before using the app.
     Navigator.of(context, rootNavigator: true).pushReplacement(
       CupertinoPageRoute(
-        builder: (_) => widget.alreadyOnboarded
-            ? const MainTabScreen()
-            : const OnboardingScreen(),
+        builder: (_) => AuthScreen(alreadyOnboarded: widget.alreadyOnboarded),
       ),
     );
   }
