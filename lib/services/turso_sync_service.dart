@@ -200,6 +200,22 @@ class TursoSyncService {
     }
   }
 
+  /// Permanently delete all of this user's synced rows from Turso.
+  /// Used when the user deletes their account/data.
+  Future<void> purgeUserData() async {
+    final client = _client();
+    if (client == null) return;
+    try {
+      final userId = await ensureUserId();
+      await client.run('DELETE FROM sync_items WHERE user_id = ?', [userId]);
+    } catch (e) {
+      // ignore: avoid_print
+      print('[TursoSync] purge failed: $e');
+    } finally {
+      client.close();
+    }
+  }
+
   /// Try to extract the item's own "id" for a stable primary key; fall back to
   /// a hash of the payload so items without ids still de-duplicate.
   String _extractId(String jsonStr) {

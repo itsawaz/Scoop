@@ -6,9 +6,14 @@ import 'package:url_launcher/url_launcher.dart';
 import 'models.dart';
 import 'widgets.dart';
 import 'tabs.dart';
+import 'consent_screen.dart';
+import 'auth_screen.dart';
 import 'services/goal_engine.dart';
 import 'services/health_service.dart';
 import 'services/api_key_manager.dart';
+import 'services/auth_service.dart';
+import 'services/turso_sync_service.dart';
+import 'services/training_queue.dart';
 import 'widgets/api_usage_indicator.dart';
 
 
@@ -769,6 +774,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (mounted) Navigator.of(context, rootNavigator: true).pushReplacement(CupertinoPageRoute(builder: (_) => const OnboardingScreen()));
   }
 
+  /// Permanently delete the account and all associated data: cloud rows,
+  /// queued training images, the auth account, and everything local.
+  Future<void> _deleteAccountAndData() async {
+    showCupertinoDialog(
+      context: context,
+      builder: (dctx) => CupertinoAlertDialog(
+        title: const Text('Delete Account & Data?'),
+        content: const Text(
+          'This permanently deletes your account, all synced data, and any '
+          'queued images. This cannot be undone.',
+        ),
+        actions: [
+          CupertinoDialogAction(child: const Text('Cancel'), onPressed: () => Navigator.pop(dctx)),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            child: const Text('Delete Everything'),
+            onPressed: () async {
+              Navigator.pop(dctx);
+              // Purge cloud data, then account row, then local + queued images.
+              await TursoSyncService().purgeUserData();
+              await TrainingQueue().clearAll();
+              await AuthService().deleteAccount();
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.clear();
+              if (mounted) {
+                Navigator.of(context, rootNavigator: true).pushReplacement(
+                  CupertinoPageRoute(builder: (_) => const ConsentScreen(alreadyOnboarded: false)),
+                );
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _chip(String label, bool selected, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
@@ -1128,8 +1169,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
               NeonButton(text: 'Recalculate AI Goals 🎯', onPressed: _recalculateGoals, color: kTeal, isLoading: _isRecalculating),
               const SizedBox(height: 14),
               CupertinoButton(
+                onPressed: () async {
+                  await AuthService().logout();
+                  if (mounted) {
+                    Navigator.of(context, rootNavigator: true).pushReplacement(
+                      CupertinoPageRoute(builder: (_) => const AuthScreen(alreadyOnboarded: true)),
+                    );
+                  }
+                },
+                child: const Text('Log Out', style: TextStyle(color: kTeal, fontWeight: FontWeight.bold)),
+              ),
+              CupertinoButton(
                 onPressed: _resetAll,
                 child: const Text('Reset App & All Data', style: TextStyle(color: CupertinoColors.destructiveRed, fontWeight: FontWeight.bold)),
+              ),
+              CupertinoButton(
+                onPressed: _deleteAccountAndData,
+                child: const Text('Delete Account & Data', style: TextStyle(color: CupertinoColors.destructiveRed, fontWeight: FontWeight.bold)),
               ),
               const SizedBox(height: 20),
             ],

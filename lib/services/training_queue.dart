@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import '../config/sync_config.dart';
 
@@ -32,6 +33,29 @@ class TrainingQueue {
     return dir;
   }
 
+  /// Decode then re-encode a JPEG so no EXIF (incl. GPS/location), thumbnails,
+  /// or camera metadata are carried along. Falls back to the original bytes if
+  /// decoding fails (still uploads, just without guaranteed stripping).
+  Uint8List _stripMetadata(Uint8List bytes) {
+    try {
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) return bytes;
+      return Uint8List.fromList(img.encodeJpg(decoded, quality: 85));
+    } catch (_) {
+      return bytes;
+    }
+  }
+
+  /// Delete everything queued on-device (used when a user deletes their data).
+  Future<void> clearAll() async {
+    try {
+      final dir = await _dir();
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+    } catch (_) {}
+  }
+
   /// Persist a captured meal analysis for later upload.
   /// [imageBytes] may be null for text-only analyses.
   Future<void> enqueue({
@@ -57,7 +81,10 @@ class TrainingQueue {
       };
 
       if (imageBytes != null) {
-        await File('${dir.path}/$itemId.jpg').writeAsBytes(imageBytes, flush: true);
+        // Strip EXIF/GPS/metadata by decoding and re-encoding as a clean JPEG
+        // before it ever leaves the device (privacy).
+        final clean = _stripMetadata(imageBytes);
+        await File('${dir.path}/$itemId.jpg').writeAsBytes(clean, flush: true);
       }
       await File('${dir.path}/$itemId.json')
           .writeAsString(jsonEncode(meta), flush: true);
