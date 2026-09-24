@@ -31,7 +31,8 @@ const kSugar   = Color(0xFFFF2D6B);
 // Text
 const kTextPrimary   = Color(0xFFFFFFFF);
 const kTextSecondary = Color(0xFF8888AA);
-const kTextMuted     = Color(0xFF444455);
+// Bumped from #444455 for WCAG AA contrast (~5:1) against the dark background.
+const kTextMuted     = Color(0xFF8A8AA0);
 
 // ============================================================
 // GLASS CARD
@@ -376,7 +377,18 @@ class _CalorieDonutState extends State<CalorieDonut>
     // Green while within budget; pink once the calorie goal is exceeded.
     final color = isOver ? kPink : kNeon;
 
-    return AnimatedBuilder(
+    // Spoken summary for screen readers (the painted rings are invisible to
+    // assistive tech without this).
+    final semanticLabel = net >= 0
+        ? 'Calories: $consumed eaten, $totalBurnt burned, goal $goal. '
+            'Net $net kilocalories remaining.'
+        : 'Calories: $consumed eaten, $totalBurnt burned, goal $goal. '
+            'Net deficit of ${net.abs()} kilocalories.';
+
+    return Semantics(
+      label: semanticLabel,
+      value: '$consumed of $goal kcal',
+      child: AnimatedBuilder(
       animation: _anim,
       builder: (_, __) => SizedBox(
         width: widget.size,
@@ -389,7 +401,7 @@ class _CalorieDonutState extends State<CalorieDonut>
             restingShare: restingShare,
             color: color,
           ),
-          child: Center(
+          child: ExcludeSemantics(child: Center(
             child: SizedBox(
               width: widget.size * 0.65,
               child: Column(
@@ -417,9 +429,10 @@ class _CalorieDonutState extends State<CalorieDonut>
                 ],
               ),
             ),
-          ),
+          )),
         ),
       ),
+    ),
     );
   }
 }
