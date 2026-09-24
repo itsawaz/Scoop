@@ -45,6 +45,8 @@ class _LogMealScreenState extends State<LogMealScreen> {
   // Bytes of the image tied to the current analysis, kept so the training
   // queue can persist the exact photo the AI analyzed.
   Uint8List? _analyzedImageBytes;
+  // Shown when AI is unavailable/failed so the user can still log a meal.
+  bool _offerManualEntry = false;
 
   @override
   void initState() {
@@ -111,8 +113,14 @@ Return ONLY the JSON. No markdown. No backticks. No extra text.
       // Check if API is available
       if (!await _apiService.isAvailable()) {
         final statusMsg = await _apiService.getStatusMessage();
-        _chatHistory.add(ChatMessage(role: 'ai', text: statusMsg));
-        setState(() => _isAnalyzing = false);
+        _chatHistory.add(ChatMessage(
+          role: 'ai',
+          text: '$statusMsg\n\nYou can still log this meal manually — tap "Enter Manually" below.',
+        ));
+        setState(() {
+          _isAnalyzing = false;
+          _offerManualEntry = true;
+        });
         return;
       }
 
@@ -135,7 +143,11 @@ Return ONLY the JSON. No markdown. No backticks. No extra text.
       final raw = response.text?.trim() ?? '{}';
       await _processResponse(raw, isFirstTime: true);
     } catch (e) {
-      _chatHistory.add(ChatMessage(role: 'ai', text: 'Error: $e'));
+      _chatHistory.add(ChatMessage(
+        role: 'ai',
+        text: "Couldn't reach the AI ($e).\n\nYou can log this meal manually instead — tap \"Enter Manually\" below.",
+      ));
+      if (mounted) setState(() => _offerManualEntry = true);
     } finally {
       if (mounted) setState(() => _isAnalyzing = false);
       _scrollToBottom();
@@ -242,6 +254,70 @@ Do NOT wrap in backticks. Do NOT add extra keys. Return raw JSON only.
       _chatHistory.add(ChatMessage(role: 'ai', text: "Hmm, I couldn't re-parse that. Try rephrasing — e.g. 'it was 500g, not 200g'."));
     }
     if (mounted) setState(() {});
+  }
+
+  /// Manual meal entry fallback for when AI is down or the daily quota is hit.
+  /// Lets the user log calories + core macros directly, with the same Atwater
+  /// validation applied, then logs it like any other meal.
+  void _manualEntry() {
+    final nameCtrl = TextEditingController(
+      text: _descController.text.trim().isEmpty ? 'Meal' : _descController.text.trim(),
+    );
+    final calCtrl = TextEditingController();
+    final proteinCtrl = TextEditingController();
+    final carbsCtrl = TextEditingController();
+    final fatCtrl = TextEditingController();
+
+    Widget field(String label, TextEditingController c, {bool number = true}) => Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: CupertinoTextField(
+            controller: c,
+            placeholder: label,
+            keyboardType: number
+                ? const TextInputType.numberWithOptions(decimal: true)
+                : TextInputType.text,
+            style: const TextStyle(color: CupertinoColors.white),
+            decoration: BoxDecoration(color: const Color(0xFF1A1A1A), borderRadius: BorderRadius.circular(8)),
+          ),
+        );
+
+    showCupertinoDialog(
+      context: context,
+      builder: (dctx) => CupertinoAlertDialog(
+        title: const Text('Log Meal Manually'),
+        content: Column(children: [
+          const SizedBox(height: 8),
+          field('Meal name', nameCtrl, number: false),
+          field('Calories (kcal)', calCtrl),
+          field('Protein (g)', proteinCtrl),
+          field('Carbs (g)', carbsCtrl),
+          field('Fat (g)', fatCtrl),
+        ]),
+        actions: [
+          CupertinoDialogAction(child: const Text('Cancel'), onPressed: () => Navigator.pop(dctx)),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            child: const Text('Log'),
+            onPressed: () {
+              final n = NutritionData(
+                calories: int.tryParse(calCtrl.text) ?? 0,
+                protein: double.tryParse(proteinCtrl.text) ?? 0,
+                carbs: double.tryParse(carbsCtrl.text) ?? 0,
+                fat: double.tryParse(fatCtrl.text) ?? 0,
+                sugar: 0, fiber: 0, sodium: 0, vitaminC: 0, vitaminD: 0,
+                calcium: 0, iron: 0,
+                reasoning: 'Manually entered.',
+                medicalAlert: '',
+                foodName: nameCtrl.text.trim().isEmpty ? 'Meal' : nameCtrl.text.trim(),
+              );
+              final validated = NutritionValidator.validate(n).data;
+              Navigator.pop(dctx);
+              _doLog(validated, null);
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _captureForTraining(Map<String, dynamic> analysis, bool isFirstTime) async {
@@ -688,6 +764,11 @@ Do NOT wrap in backticks. Do NOT add extra keys. Return raw JSON only.
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: NeonButton(text: "✓ Log ${_latestNutrition!.calories} kcal", onPressed: _confirmEntry),
+            ),
+          if (_offerManualEntry && _latestNutrition == null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: NeonButton(text: "✍️ Enter Manually", onPressed: _manualEntry, color: kTeal),
             ),
           Row(
             children: [
