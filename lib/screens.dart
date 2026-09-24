@@ -1,16 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show Scaffold, GridView, Curves, Colors;
+import 'package:flutter/material.dart' show GridView;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
 import 'widgets.dart';
 import 'detail_screens.dart';
 import 'services/health_service.dart';
 import 'services/streak_service.dart';
-import 'services/fasting_service.dart';
 import 'services/storage_service.dart';
-import 'log_sheets.dart';
 import 'services/coach_service.dart';
 import 'state.dart';
 
@@ -25,7 +23,6 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingObserver {
   String _name = '';
-  int _mealCount = 0;
   int _streak = 0;
   int _xp = 0;
   int _level = 1;
@@ -165,7 +162,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     double vc = 0, vd = 0, cal = 0, iron = 0;
     double satFat = 0, transFat = 0, chol = 0, pot = 0, mag = 0, zinc = 0, va = 0, vb6 = 0, vb12 = 0, folate = 0, phos = 0, iodine = 0;
     
-    final now = DateTime.now();
     final selDate = _selectedDate;
     _todayMeals.clear();
 
@@ -216,7 +212,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     }
 
     setState(() {
-      _mealCount = _todayMeals.length;
       _totals = NutritionData(
         foodName: 'Total',
         calories: cals, protein: p, carbs: c, fat: f, sugar: s, fiber: fib,

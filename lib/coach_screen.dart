@@ -1,5 +1,5 @@
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show Icons, Colors, Material, InkWell, LinearGradient, showModalBottomSheet, BottomSheet, MediaQuery, Radius, BorderRadius, BoxDecoration, Column, Expanded, Center, ListView, Padding, EdgeInsets, Text, TextStyle, FontWeight, Container;
+import 'package:flutter/material.dart' show LinearGradient, MediaQuery, Radius, BorderRadius, BoxDecoration, Column, Expanded, Center, ListView, Padding, EdgeInsets, Text, TextStyle, FontWeight, Container;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'widgets.dart';
 import 'services/coach_service.dart';

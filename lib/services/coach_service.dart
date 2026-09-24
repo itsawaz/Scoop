@@ -144,7 +144,7 @@ class CoachService {
     }
 
     _model = GenerativeModel(
-      model: 'gemma-4-31b-it',
+      model: 'gemini-3.5-flash-lite',
       apiKey: apiKey,
       systemInstruction: Content.system(context),
     );

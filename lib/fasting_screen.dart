@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show Colors;
 import 'widgets.dart';
 import 'models.dart';
 import 'services/fasting_service.dart';

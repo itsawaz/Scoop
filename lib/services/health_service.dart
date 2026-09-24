@@ -160,6 +160,15 @@ class HealthService {
     return estimatedBasal;
   }
 
+  /// Safely read a numeric value from a HealthDataPoint. Returns 0 for any
+  /// non-numeric sample instead of throwing, so one odd point can't abort the
+  /// whole aggregation loop (which would silently drop calories/steps).
+  double _numVal(HealthDataPoint data) {
+    final v = data.value;
+    if (v is NumericHealthValue) return v.numericValue.toDouble();
+    return 0.0;
+  }
+
   List<HealthDataPoint> _dedupePoints(List<HealthDataPoint> points) {
     final seen = <String>{};
     final deduped = <HealthDataPoint>[];
@@ -190,14 +199,18 @@ class HealthService {
         endTime: endTime,
       );
       
-      print('[HealthService] Received ${result.length} data points for $type');
-      if (result.isNotEmpty) {
-        for (var point in result.take(3)) {
+      // Remove exact-duplicate samples (e.g. iPhone + Apple Watch both
+      // reporting the same energy) so calorie/step totals aren't inflated.
+      final deduped = _dedupePoints(result);
+
+      print('[HealthService] Received ${result.length} data points for $type (${deduped.length} after dedupe)');
+      if (deduped.isNotEmpty) {
+        for (var point in deduped.take(3)) {
           print('[HealthService]   - ${point.value} from ${point.sourceName} (${point.sourceId})');
         }
       }
       
-      return result;
+      return deduped;
     } catch (e) {
       print('[HealthService] Error fetching energy data for $type: $e');
       return [];
@@ -398,7 +411,7 @@ class HealthService {
       final basalBySource = <String, double>{};
 
       for (var data in activePoints) {
-        final val = (data.value as NumericHealthValue).numericValue.toDouble();
+        final val = _numVal(data);
         activeCals += val;
         final key = '${data.sourceName} (${data.sourceId})';
         activeBySource[key] = (activeBySource[key] ?? 0) + val;
@@ -407,7 +420,7 @@ class HealthService {
         }
       }
       for (var data in basalPoints) {
-        final val = (data.value as NumericHealthValue).numericValue.toDouble();
+        final val = _numVal(data);
         basalCals += val;
         final key = '${data.sourceName} (${data.sourceId})';
         basalBySource[key] = (basalBySource[key] ?? 0) + val;
@@ -418,7 +431,6 @@ class HealthService {
 
       // If Health data is slow to update, interpolate resting calories in real time.
       final minutesSinceMidnight = math.max(1, now.difference(midnight).inMinutes);
-      bool basalIsEstimated = false;
       
       if (basalCals > 0) {
         _lastBasalRatePerMin = basalCals / minutesSinceMidnight;
@@ -525,10 +537,10 @@ class HealthService {
       );
 
       for (var data in activePoints) {
-        activeCals += (data.value as NumericHealthValue).numericValue.toDouble();
+        activeCals += _numVal(data);
       }
       for (var data in basalPoints) {
-        basalCals += (data.value as NumericHealthValue).numericValue.toDouble();
+        basalCals += _numVal(data);
       }
       for (var data in mindfulPoints) {
         final diff = data.dateTo.difference(data.dateFrom);
@@ -536,7 +548,6 @@ class HealthService {
       }
 
       // Apply fallback basal calculation if no HealthKit data
-      bool basalIsEstimated = false;
       if (basalCals == 0) {
         await _loadUserBMR(); // Load user's actual BMR first
         basalCals = _calculateEstimatedBasalCalories(midnight, now);
@@ -611,7 +622,7 @@ class HealthService {
       Map<HealthDataType, List<double>> grouped = {};
       for (var data in exData) {
         if (!grouped.containsKey(data.type)) grouped[data.type] = [];
-        grouped[data.type]!.add((data.value as NumericHealthValue).numericValue.toDouble());
+        grouped[data.type]!.add(_numVal(data));
       }
       
       double avg(List<double> list) => list.reduce((a, b) => a + b) / list.length;
@@ -639,7 +650,9 @@ class HealthService {
       if (grouped.containsKey(HealthDataType.EXERCISE_TIME)) extended['Exercise'] = {'value': sum(grouped[HealthDataType.EXERCISE_TIME]!).round(), 'unit': 'min', 'emoji': '⏱️'};
       if (grouped.containsKey(HealthDataType.WATER)) extended['Water'] = {'value': sum(grouped[HealthDataType.WATER]!).toStringAsFixed(1), 'unit': 'L', 'emoji': '💧'};
 
-    } catch (e) {}
+    } catch (e) {
+      print('[HealthService] Error fetching extended metrics: $e');
+    }
 
     final snapshot = HealthSnapshot(
       steps: steps,

@@ -12,7 +12,7 @@ class GoalEngine {
       throw Exception('API Key is missing');
     }
 
-    final model = GenerativeModel(model: 'gemma-4-31b-it', apiKey: apiKey);
+    final model = GenerativeModel(model: 'gemini-3.5-flash-lite', apiKey: apiKey);
 
     final prompt = """
 You are a certified sports dietitian and medical nutritionist. A user has provided their health data below.

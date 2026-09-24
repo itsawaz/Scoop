@@ -1,8 +1,6 @@
 import 'dart:io';
-import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'models.dart';
@@ -84,8 +82,6 @@ class MedicalProfileScreen extends StatefulWidget {
 }
 
 class _MedicalProfileScreenState extends State<MedicalProfileScreen> {
-  final _conditionsController = TextEditingController();
-  final _goalsController = TextEditingController();
 
   final _conditions = [
     'None', 'Type 2 Diabetes', 'Type 1 Diabetes', 'Hypertension',
@@ -412,7 +408,7 @@ class _ApiKeyScreenState extends State<ApiKeyScreen> {
       
       // Validate API key
       try {
-        final testModel = GenerativeModel(model: 'gemini-2.5-flash-lite', apiKey: apiKey);
+        final testModel = GenerativeModel(model: 'gemini-3.5-flash-lite', apiKey: apiKey);
         await testModel.generateContent([Content.text("hi")]);
       } catch (e) {
         if (mounted) {

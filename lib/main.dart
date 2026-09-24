@@ -1,6 +1,5 @@
 import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'widgets.dart';
 import 'onboarding.dart';
 import 'tabs.dart';
 

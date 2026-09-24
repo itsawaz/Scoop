@@ -21,7 +21,7 @@ class ApiRateLimiter {
     final prefs = await SharedPreferences.getInstance();
     
     // Get model limits
-    final modelName = model ?? 'gemini-2.5-flash-lite';
+    final modelName = model ?? 'gemini-3.5-flash-lite';
     final limits = ModelSelector.getModelLimits(modelName);
     final maxRpm = limits['rpm'] ?? 15;
     final maxRpd = limits['rpd'] ?? 1000;
@@ -77,7 +77,7 @@ class ApiRateLimiter {
     final prefs = await SharedPreferences.getInstance();
     final now = DateTime.now();
     
-    final modelName = model ?? 'gemini-2.5-flash-lite';
+    final modelName = model ?? 'gemini-3.5-flash-lite';
     final limits = ModelSelector.getModelLimits(modelName);
     final maxRpd = limits['rpd'] ?? 1000;
     
@@ -93,7 +93,7 @@ class ApiRateLimiter {
 
   /// Get user-friendly error message when limit is reached
   String getErrorMessage({String? model}) {
-    final modelName = model ?? 'gemini-2.5-flash-lite';
+    final modelName = model ?? 'gemini-3.5-flash-lite';
     final limits = ModelSelector.getModelLimits(modelName);
     final maxRpd = limits['rpd'] ?? 1000;
     

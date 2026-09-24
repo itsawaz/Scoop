@@ -73,7 +73,7 @@ class FastingService {
     double sleepHours = snap.sleepHours;
     if (sleepHours == 0) sleepHours = 7.0; // fallback if no health data
 
-    final model = GenerativeModel(model: 'gemma-4-31b-it', apiKey: apiKey);
+    final model = GenerativeModel(model: 'gemini-3.5-flash-lite', apiKey: apiKey);
     final prompt = """
 You are a fasting coach. 
 The user slept for ${sleepHours.toStringAsFixed(1)} hours last night.

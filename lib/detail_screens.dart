@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show Slider, SliderTheme, SliderThemeData, Material, MaterialType, Colors;
+import 'package:flutter/material.dart' show Slider, SliderTheme, SliderThemeData, Material, MaterialType;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'models.dart';
@@ -393,7 +393,7 @@ Respond with ONLY this JSON (no markdown, no extra text):
 ''';
 
     try {
-      final model = GenerativeModel(model: 'gemma-4-31b-it', apiKey: apiKey);
+      final model = GenerativeModel(model: 'gemini-3.5-flash-lite', apiKey: apiKey);
       final response = await model.generateContent([Content.text(prompt)]);
       final raw = response.text?.trim() ?? '{}';
       String jsonStr = raw.replaceAll(RegExp(r'```json|```'), '').trim();

@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 class UserProfile {
   final String name;
   final String conditions; // e.g. "Diabetes, Hypertension"

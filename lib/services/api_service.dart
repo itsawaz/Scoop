@@ -88,8 +88,8 @@ class ApiService {
     await keyManager.loadApiKeys();
 
     final stats = await keyManager.getUsageStats();
-    final totalLimit = await keyManager.getTotalDailyLimit(modelName: 'gemini-2.5-flash-lite');
-    final remaining = await keyManager.getRemainingRequests(modelName: 'gemini-2.5-flash-lite');
+    final totalLimit = await keyManager.getTotalDailyLimit(modelName: 'gemini-3.5-flash-lite');
+    final remaining = await keyManager.getRemainingRequests(modelName: 'gemini-3.5-flash-lite');
 
     return {
       'keyStats': stats,
@@ -131,8 +131,8 @@ class ApiService {
       return 'No API key configured. Add one in Profile settings.';
     }
 
-    final remaining = await keyManager.getRemainingRequests(modelName: 'gemini-2.5-flash-lite');
-    final totalLimit = await keyManager.getTotalDailyLimit(modelName: 'gemini-2.5-flash-lite');
+    final remaining = await keyManager.getRemainingRequests(modelName: 'gemini-3.5-flash-lite');
+    final totalLimit = await keyManager.getTotalDailyLimit(modelName: 'gemini-3.5-flash-lite');
     final keyCount = keyManager.getKeyCount();
 
     if (remaining == 0) {

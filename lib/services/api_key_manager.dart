@@ -62,7 +62,7 @@ class ApiKeyManager {
     }
 
     // Get model limits
-    final limits = _getModelLimits(modelName ?? 'gemini-2.5-flash-lite');
+    final limits = _getModelLimits(modelName ?? 'gemini-3.5-flash-lite');
     final maxRpd = limits['rpd'] ?? 1000;
 
     // Try each key in rotation
@@ -117,14 +117,14 @@ class ApiKeyManager {
 
   /// Get total daily limit across all keys
   Future<int> getTotalDailyLimit({String? modelName}) async {
-    final limits = _getModelLimits(modelName ?? 'gemini-2.5-flash-lite');
+    final limits = _getModelLimits(modelName ?? 'gemini-3.5-flash-lite');
     final rpdPerKey = limits['rpd'] ?? 1000;
     return _apiKeys.length * rpdPerKey;
   }
 
   /// Get remaining requests across all keys
   Future<int> getRemainingRequests({String? modelName}) async {
-    final limits = _getModelLimits(modelName ?? 'gemini-2.5-flash-lite');
+    final limits = _getModelLimits(modelName ?? 'gemini-3.5-flash-lite');
     final rpdPerKey = limits['rpd'] ?? 1000;
     
     int totalRemaining = 0;
@@ -169,16 +169,12 @@ class ApiKeyManager {
 
   Map<String, int> _getModelLimits(String model) {
     switch (model) {
-      case 'gemini-2.5-flash-lite':
+      case 'gemini-3.5-flash-lite':
         return {'rpm': 15, 'rpd': 1000, 'tpm': 250000};
-      case 'gemini-2.5-flash':
+      case 'gemini-3.5-flash':
         return {'rpm': 10, 'rpd': 250, 'tpm': 250000};
-      case 'gemini-2.5-pro':
-        return {'rpm': 5, 'rpd': 100, 'tpm': 250000};
-      case 'gemma-4-31b-it':
-        return {'rpm': 15, 'rpd': 1500, 'tpm': -1};
       default:
-        return {'rpm': 5, 'rpd': 20, 'tpm': 250000};
+        return {'rpm': 10, 'rpd': 250, 'tpm': 250000};
     }
   }
 }

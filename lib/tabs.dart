@@ -1,5 +1,5 @@
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show Icons, Colors, FloatingActionButtonLocation, Scaffold;
+import 'package:flutter/material.dart' show FloatingActionButtonLocation, Scaffold;
 import 'models.dart';
 import 'widgets.dart';
 import 'screens.dart';

@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show Colors, LinearGradient, RadialGradient;
+import 'package:flutter/material.dart' show Colors, LinearGradient;
 
 // ============================================================
 // HOOP — NOVA DESIGN SYSTEM
@@ -355,19 +355,26 @@ class _CalorieDonutState extends State<CalorieDonut>
 
   @override
   Widget build(BuildContext context) {
-    final burnt = widget.burnt ?? 0;
-    final resting = widget.resting ?? 0;
+    final consumed = widget.consumed < 0 ? 0 : widget.consumed;
+    final burnt = (widget.burnt ?? 0) < 0 ? 0 : (widget.burnt ?? 0);
+    final resting = (widget.resting ?? 0) < 0 ? 0 : (widget.resting ?? 0);
     final totalBurnt = burnt + resting;
-    
-    final effective = widget.consumed - totalBurnt;
-    final consumedPct = (widget.consumed / (widget.goal == 0 ? 1 : widget.goal)).clamp(0.0, 1.2);
-    final totalBurntPct = (totalBurnt / (widget.goal == 0 ? 1 : widget.goal)).clamp(0.0, 1.2);
+    final goal = widget.goal <= 0 ? 1 : widget.goal;
+
+    // Net calories = eaten minus burned. Positive = still have budget,
+    // negative = net deficit for the day.
+    final net = consumed - totalBurnt;
+
+    // Ring fractions. Outer = consumed vs goal (this is the ring that
+    // "closes" when you hit your calorie goal). Inner = calories burned.
+    final consumedFrac = (consumed / goal).clamp(0.0, 1.0);
+    final overFrac = ((consumed - goal) / goal).clamp(0.0, 1.0); // overflow beyond goal
+    final totalBurntFrac = (totalBurnt / goal).clamp(0.0, 1.0);
     final restingShare = totalBurnt == 0 ? 0.0 : (resting / totalBurnt).clamp(0.0, 1.0);
-    
-    final isOver = effective > widget.goal;
-    final isDeficit = effective < 0;
-    final color = isOver ? kPink : (isDeficit ? kNeon : kNeon);
-    final remaining = widget.goal - effective;
+
+    final isOver = consumed > goal;
+    // Green while within budget; pink once the calorie goal is exceeded.
+    final color = isOver ? kPink : kNeon;
 
     return AnimatedBuilder(
       animation: _anim,
@@ -376,8 +383,9 @@ class _CalorieDonutState extends State<CalorieDonut>
         height: widget.size,
         child: CustomPaint(
           painter: _DonutPainter(
-            consumedPct: (consumedPct * _anim.value).clamp(0.0, 1.2),
-            totalBurntPct: (totalBurntPct * _anim.value).clamp(0.0, 1.2),
+            consumedFrac: consumedFrac * _anim.value,
+            overFrac: overFrac * _anim.value,
+            totalBurntFrac: totalBurntFrac * _anim.value,
             restingShare: restingShare,
             color: color,
           ),
@@ -387,29 +395,29 @@ class _CalorieDonutState extends State<CalorieDonut>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                Text(
-                  '${effective.round()}',
-                  style: TextStyle(
-                    color: color,
-                    fontSize: widget.size * 0.18,
-                    fontWeight: FontWeight.w900,
-                    height: 1,
-                    letterSpacing: -2,
+                  Text(
+                    '${net.abs()}',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: widget.size * 0.18,
+                      fontWeight: FontWeight.w900,
+                      height: 1,
+                      letterSpacing: -2,
+                    ),
                   ),
-                ),
-                Text(
-                  'kcal',
-                  style: TextStyle(
-                    color: kTextSecondary,
-                    fontSize: widget.size * 0.08,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 2,
+                  Text(
+                    net >= 0 ? 'kcal net' : 'kcal deficit',
+                    style: TextStyle(
+                      color: kTextSecondary,
+                      fontSize: widget.size * 0.075,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.5,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
         ),
       ),
     );
@@ -417,16 +425,26 @@ class _CalorieDonutState extends State<CalorieDonut>
 }
 
 class _DonutPainter extends CustomPainter {
-  final double consumedPct;
-  final double totalBurntPct;
+  /// 0..1 fraction of the calorie goal consumed (outer ring).
+  final double consumedFrac;
+  /// 0..1 fraction consumed *beyond* the goal (drawn as an overflow arc).
+  final double overFrac;
+  /// 0..1 fraction of the goal burned (inner ring).
+  final double totalBurntFrac;
+  /// Share of the burned ring that is resting/basal (rest is active).
   final double restingShare;
   final Color color;
+
   _DonutPainter({
-    required this.consumedPct, 
-    required this.totalBurntPct,
+    required this.consumedFrac,
+    required this.overFrac,
+    required this.totalBurntFrac,
     required this.restingShare,
     required this.color,
   });
+
+  static const double _start = -math.pi / 2; // 12 o'clock
+  static const double _tau = 2 * math.pi;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -435,82 +453,80 @@ class _DonutPainter extends CustomPainter {
     const gap = 4.0;
 
     final cx = size.width / 2, cy = size.height / 2;
-    
-    // Outer Ring (Consumed)
+
     final rOuter = cx - swOuter / 2 - 4;
-    // Inner Ring (Burnt: Active + Resting)
     final rInner = rOuter - swOuter / 2 - gap - swInner / 2;
 
-    // Background rings
-    canvas.drawCircle(Offset(cx, cy), rOuter, Paint()..color = kBorder2..style = PaintingStyle.stroke..strokeWidth = swOuter);
-    canvas.drawCircle(Offset(cx, cy), rInner, Paint()..color = kBorder2.withValues(alpha: 0.4)..style = PaintingStyle.stroke..strokeWidth = swInner);
+    final outerRect = Rect.fromCircle(center: Offset(cx, cy), radius: rOuter);
+    final innerRect = Rect.fromCircle(center: Offset(cx, cy), radius: rInner);
 
-    // Inner Ring: Burnt Calories (Active + Resting, split by color)
-    if (totalBurntPct > 0) {
-      final totalSweep = 2 * math.pi * totalBurntPct.clamp(0.0, 1.0);
+    // Background rings.
+    canvas.drawCircle(Offset(cx, cy), rOuter,
+        Paint()..color = kBorder2..style = PaintingStyle.stroke..strokeWidth = swOuter);
+    canvas.drawCircle(Offset(cx, cy), rInner,
+        Paint()..color = kBorder2.withValues(alpha: 0.4)..style = PaintingStyle.stroke..strokeWidth = swInner);
+
+    // ---- Inner ring: burned calories (resting=teal, active=amber) ----
+    final burntFrac = totalBurntFrac.clamp(0.0, 1.0);
+    if (burntFrac > 0) {
+      final totalSweep = _tau * burntFrac;
       final restingSweep = totalSweep * restingShare.clamp(0.0, 1.0);
       final activeSweep = totalSweep - restingSweep;
 
       if (restingSweep > 0) {
-        final pResting = Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = swInner
-          ..strokeCap = StrokeCap.round
-          ..color = kTeal;
-
-        canvas.drawArc(
-          Rect.fromCircle(center: Offset(cx, cy), radius: rInner),
-          -math.pi / 2,
-          restingSweep,
-          false,
-          pResting,
-        );
+        canvas.drawArc(innerRect, _start, restingSweep, false,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = swInner
+              ..strokeCap = StrokeCap.round
+              ..color = kTeal);
       }
-
       if (activeSweep > 0) {
-        final pActive = Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = swInner
-          ..strokeCap = StrokeCap.round
-          ..color = kAmber;
-
-        canvas.drawArc(
-          Rect.fromCircle(center: Offset(cx, cy), radius: rInner),
-          -math.pi / 2 + restingSweep,
-          activeSweep,
-          false,
-          pActive,
-        );
+        canvas.drawArc(innerRect, _start + restingSweep, activeSweep, false,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = swInner
+              ..strokeCap = StrokeCap.round
+              ..color = kAmber);
       }
     }
 
-    // Outer Ring: Consumed Calories (Dynamic Color - green or pink)
-    if (consumedPct > 0) {
-      final pConsumed = Paint()
+    // ---- Outer ring: consumed vs goal ----
+    final cFrac = consumedFrac.clamp(0.0, 1.0);
+    if (cFrac > 0) {
+      final sweep = _tau * cFrac;
+      // Gradient endAngle must match the actual sweep so colors don't wrap.
+      final paint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = swOuter
         ..strokeCap = StrokeCap.round
         ..shader = SweepGradient(
-          colors: [color, color.withValues(alpha: 0.7)],
-          startAngle: -math.pi / 2,
-          endAngle: 2 * math.pi * consumedPct - math.pi / 2,
+          colors: [color.withValues(alpha: 0.7), color],
+          startAngle: _start,
+          endAngle: _start + sweep,
           tileMode: TileMode.clamp,
-        ).createShader(Rect.fromCircle(center: Offset(cx, cy), radius: rOuter));
+        ).createShader(outerRect);
+      canvas.drawArc(outerRect, _start, sweep, false, paint);
+    }
 
-      canvas.drawArc(
-        Rect.fromCircle(center: Offset(cx, cy), radius: rOuter),
-        -math.pi / 2,
-        2 * math.pi * consumedPct.clamp(0.0, 1.0),
-        false,
-        pConsumed,
-      );
+    // ---- Overflow arc: consumed beyond the goal (drawn in pink on top) ----
+    final oFrac = overFrac.clamp(0.0, 1.0);
+    if (oFrac > 0) {
+      final sweep = _tau * oFrac;
+      canvas.drawArc(outerRect, _start, sweep, false,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = swOuter
+            ..strokeCap = StrokeCap.round
+            ..color = kPink);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _DonutPainter old) => 
-      old.consumedPct != consumedPct || 
-      old.totalBurntPct != totalBurntPct || 
+  bool shouldRepaint(covariant _DonutPainter old) =>
+      old.consumedFrac != consumedFrac ||
+      old.overFrac != overFrac ||
+      old.totalBurntFrac != totalBurntFrac ||
       old.restingShare != restingShare ||
       old.color != color;
 }
