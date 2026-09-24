@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/cupertino.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:image_picker/image_picker.dart';
@@ -9,6 +11,9 @@ import 'widgets.dart';
 import 'services/storage_service.dart';
 import 'services/streak_service.dart';
 import 'services/api_service.dart';
+import 'services/nutrition_validator.dart';
+import 'services/training_queue.dart';
+import 'services/turso_sync_service.dart';
 import 'state.dart';
 
 class ChatMessage {
@@ -37,6 +42,9 @@ class _LogMealScreenState extends State<LogMealScreen> {
   final ApiService _apiService = ApiService();
   String _conditions = '';
   String _goals = '';
+  // Bytes of the image tied to the current analysis, kept so the training
+  // queue can persist the exact photo the AI analyzed.
+  Uint8List? _analyzedImageBytes;
 
   @override
   void initState() {
@@ -115,6 +123,7 @@ Return ONLY the JSON. No markdown. No backticks. No extra text.
       final List<Part> parts = [prompt];
       if (_image != null) {
         final bytes = await File(_image!.path).readAsBytes();
+        _analyzedImageBytes = bytes;
         parts.add(DataPart('image/jpeg', bytes));
       }
 
@@ -206,12 +215,24 @@ Do NOT wrap in backticks. Do NOT add extra keys. Return raw JSON only.
         jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
       }
       final data = jsonDecode(jsonStr);
-      final nutrition = NutritionData.fromJson(data);
+      final parsed = NutritionData.fromJson(data);
+
+      // Guardrails: clamp implausible values and check macro/calorie
+      // consistency so bad AI output doesn't corrupt the log.
+      final validation = NutritionValidator.validate(parsed);
+      final nutrition = validation.data;
       _latestNutrition = nutrition;
+
+      // Capture (image + analysis) for the AI training pipeline. Image only on
+      // the first analysis of this photo; follow-ups are text refinements.
+      unawaited(_captureForTraining(data as Map<String, dynamic>, isFirstTime));
 
       String aiText = "Updated to **${nutrition.calories} kcal** for \"${nutrition.foodName}\".\n\n${nutrition.reasoning}";
       if (nutrition.medicalAlert.isNotEmpty) {
         aiText += "\n\n⚠️ ${nutrition.medicalAlert}";
+      }
+      if (validation.hasWarnings) {
+        aiText += "\n\n⚠️ ${validation.warnings.join(' ')}";
       }
       aiText += "\n\nAnything else to correct?";
 
@@ -221,6 +242,21 @@ Do NOT wrap in backticks. Do NOT add extra keys. Return raw JSON only.
       _chatHistory.add(ChatMessage(role: 'ai', text: "Hmm, I couldn't re-parse that. Try rephrasing — e.g. 'it was 500g, not 200g'."));
     }
     if (mounted) setState(() {});
+  }
+
+  Future<void> _captureForTraining(Map<String, dynamic> analysis, bool isFirstTime) async {
+    try {
+      final userId = await TursoSyncService().ensureUserId();
+      await TrainingQueue().enqueue(
+        userId: userId,
+        analysis: analysis,
+        imageBytes: isFirstTime ? _analyzedImageBytes : null,
+        userDescription: _descController.text.trim(),
+        modelUsed: 'gemini-3.5-flash-lite',
+      );
+    } catch (_) {
+      // Best-effort; must never affect the user flow.
+    }
   }
 
   void _scrollToBottom() {
@@ -286,7 +322,13 @@ Do NOT wrap in backticks. Do NOT add extra keys. Return raw JSON only.
     final updatedN = NutritionData(
       calories: n.calories, protein: n.protein, carbs: n.carbs, fat: n.fat, sugar: n.sugar,
       fiber: n.fiber, sodium: n.sodium, vitaminC: n.vitaminC, vitaminD: n.vitaminD,
-      calcium: n.calcium, iron: n.iron, reasoning: n.reasoning, medicalAlert: n.medicalAlert,
+      calcium: n.calcium, iron: n.iron,
+      // Preserve extended nutrients from the analyzed result.
+      saturatedFat: n.saturatedFat, transFat: n.transFat, cholesterol: n.cholesterol,
+      potassium: n.potassium, magnesium: n.magnesium, zinc: n.zinc,
+      vitaminA: n.vitaminA, vitaminB6: n.vitaminB6, vitaminB12: n.vitaminB12,
+      folate: n.folate, phosphorus: n.phosphorus, iodine: n.iodine,
+      reasoning: n.reasoning, medicalAlert: n.medicalAlert,
       foodName: name,
     );
     final saved = SavedMeal(
@@ -327,17 +369,13 @@ Do NOT wrap in backticks. Do NOT add extra keys. Return raw JSON only.
     historyList.add(jsonEncode(entry.toJson()));
     await prefs.setStringList('history', historyList);
 
-    // API limit counter
-    final todayStr = "${now.year}-${now.month}-${now.day}";
-    final apiDate = prefs.getString('api_date') ?? todayStr;
-    int apiCount = (apiDate == todayStr) ? (prefs.getInt('api_count') ?? 0) : 0;
-    await prefs.setString('api_date', todayStr);
-    await prefs.setInt('api_count', apiCount + 1);
-
     // Only award streak/XP when logging for today
     if (isSelectedDateToday) {
       await StreakService().logActivity();
     }
+
+    // Back the new data up to the cloud (no-op if not signed in / configured).
+    unawaited(TursoSyncService().push());
 
     if (mounted) Navigator.pop(context, entry);
   }

@@ -10,6 +10,8 @@ import 'services/health_service.dart';
 import 'services/streak_service.dart';
 import 'services/storage_service.dart';
 import 'services/coach_service.dart';
+import 'services/turso_sync_service.dart';
+import 'services/training_queue.dart';
 import 'state.dart';
 
 // ==========================================
@@ -130,6 +132,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     if (state == AppLifecycleState.resumed) {
       _loadData();
       _loadHealth();
+      // Back up local data and drain the training upload queue on resume.
+      // Both are no-ops when not signed in / remotes not configured.
+      TursoSyncService().push();
+      TrainingQueue().flush();
     }
   }
 

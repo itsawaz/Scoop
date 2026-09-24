@@ -1,11 +1,17 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models.dart';
+import 'turso_sync_service.dart';
 
 class StorageService {
   static final StorageService _instance = StorageService._internal();
   factory StorageService() => _instance;
   StorageService._internal();
+
+  /// Fire-and-forget cloud backup after any local mutation.
+  /// No-op unless signed in and Turso is configured.
+  void _backup() => unawaited(TursoSyncService().push());
 
   // === Saved Meals ===
   Future<List<SavedMeal>> getSavedMeals() async {
@@ -19,6 +25,7 @@ class StorageService {
     final list = prefs.getStringList('saved_meals') ?? [];
     list.add(jsonEncode(meal.toJson()));
     await prefs.setStringList('saved_meals', list);
+    _backup();
   }
 
   Future<void> incrementSavedMealUse(String id) async {
@@ -63,6 +70,7 @@ class StorageService {
     
     // Also update current profile weight
     await prefs.setDouble('weight_kg', entry.weightKg);
+    _backup();
   }
 
   // === Supplement Log ===
@@ -77,6 +85,7 @@ class StorageService {
     final list = prefs.getStringList('supplement_log') ?? [];
     list.add(jsonEncode(entry.toJson()));
     await prefs.setStringList('supplement_log', list);
+    _backup();
   }
 
   Future<void> deleteSupplementLog(String id) async {
@@ -88,6 +97,7 @@ class StorageService {
       } catch (_) { return false; }
     });
     await prefs.setStringList('supplement_log', list);
+    _backup();
   }
 
   // === Saved Supplements ===
@@ -102,6 +112,7 @@ class StorageService {
     final list = prefs.getStringList('saved_supplements') ?? [];
     list.add(jsonEncode(supplement.toJson()));
     await prefs.setStringList('saved_supplements', list);
+    _backup();
   }
 
   Future<void> incrementSavedSupplementUse(String id) async {
